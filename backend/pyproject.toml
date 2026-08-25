@@ -1,0 +1,105 @@
+[project]
+name = "docmgmt-backend"
+version = "0.1.0"
+description = "Secure Document Management System - backend (API + Celery workers, one codebase)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115,<0.142",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.5,<3",
+    "sqlalchemy>=2.0.40,<2.1",
+    "alembic>=1.14,<2",
+    "psycopg[binary]>=3.2,<4",
+    "celery>=5.5,<6",
+    "redis>=5,<8",
+    "pgvector>=0.3,<1",
+    "boto3>=1.35",
+    "pyjwt>=2.10,<3",
+    "httpx>=0.27",
+    "puremagic>=2.0",
+    "faker>=30",
+    "python-multipart",
+]
+
+[project.optional-dependencies]
+parsers = [
+    "pymupdf>=1.24",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+]
+ml = [
+    "scikit-learn>=1.5",
+    "sentence-transformers>=3.0",
+]
+dev = [
+    "pytest>=8",
+    "anyio>=4",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-requests",
+]
+
+[build-system]
+# Build backend exists ONLY so `pip install ".[parsers,dev]"` can resolve the
+# dependency sets (Dockerfile + local venv). The wheel itself ships no modules;
+# `app` is imported from the working directory, never from site-packages.
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "W",     # pycodestyle warnings
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "A",     # flake8-builtins
+    "C4",    # flake8-comprehensions
+    "T20",   # flake8-print
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific
+    "ASYNC", # flake8-async
+    "S",     # flake8-bandit
+]
+ignore = [
+    "D",      # docstring rules deferred to a later wave
+    "COM812", # conflicts with the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"] # asserts are the point of tests
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
+
+[[tool.mypy.overrides]]
+module = [
+    "celery.*",
+    "kombu.*",
+    "billiard.*",
+    "puremagic",
+    "pgvector",
+    "fitz",
+    "docx",
+    "openpyxl",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = '-m "not integration"'
+markers = ["integration: requires compose infra"]
+testpaths = ["tests"]
