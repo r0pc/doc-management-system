@@ -1,0 +1,139 @@
+# Secure Document Management System - compose stack.
+# Bare `docker compose up -d` works without a .env file: every variable uses
+# ${VAR:-default} interpolation. Copy .env.example to .env to override.
+#
+# TODO(Wave 2.A): replace direct api/worker commands with the shared
+# scripts/entrypoint-api.sh bootstrap (migrations + wait-for-infra).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-docmgmt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docmgmt}
+      POSTGRES_DB: ${POSTGRES_DB:-docmgmt}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docmgmt} -d ${POSTGRES_DB:-docmgmt}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      # `mc ready local` is MinIO's documented healthcheck (mc ships in-image).
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  clamav:
+    image: clamav/clamav:latest
+    ports:
+      - "3310:3310"
+    volumes:
+      # Persist signature DB so restarts skip the multi-minute freshclam download.
+      - clamavdb:/var/lib/clamav
+    healthcheck:
+      # clamdscan --ping=1 exits 0 once clamd accepts connections. First boot
+      # downloads signatures for minutes; start_period tolerates that and api/
+      # workers deliberately depend on service_started, NOT service_healthy.
+      test: ["CMD-SHELL", "clamdscan --ping=1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  api:
+    build: ./backend
+    init: true
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_BACKEND: local # dev default; switch to minio with real buckets later
+      SCAN_ENABLED: "true"
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+
+  worker:
+    build: ./backend
+    init: true
+    entrypoint: ["celery"]
+    command: ["-A", "app.workers.celery_app.celery_app", "worker", "-Q", "default", "-l", "info", "--pool=solo"] # pool=solo dev-only; prod uses prefork/gevent
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_BACKEND: local
+      SCAN_ENABLED: "true"
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+
+  worker-ocr:
+    build: ./backend
+    init: true
+    entrypoint: ["celery"]
+    command: ["-A", "app.workers.celery_app.celery_app", "worker", "-Q", "ocr", "-l", "info", "--pool=solo"] # dedicated OCR queue; never merge with default
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_BACKEND: local
+      SCAN_ENABLED: "true"
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+
+volumes:
+  pgdata:
+  miniodata:
+  clamavdb:
