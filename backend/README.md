@@ -71,3 +71,16 @@ pyproject.toml
 | `presign_ttl_seconds` | int | `90` | clamped to 60..120 by validator |
 
 Settings read `.env` (cwd-relative), no env prefix, unknown keys ignored. Frozen after construction.
+
+## Domain
+
+`app/domain/` is the pure security core — the single source of truth both the API and workers import for every authorisation decision and label aggregation. No framework imports (no web, no ORM), no I/O, fully deterministic; `tests/domain/test_purity.py` enforces this by scanning module sources.
+
+| Module | Owns |
+|---|---|
+| `models.py` | Frozen value objects: `LevelName`, `LEVEL_RANK`, `DEFAULT_FLOOR_RANK = 2` (Internal floor — absence of evidence defaults UP), `Finding` (char offsets only, never matched text), `UserCtx`, `DocumentRef`, `Action` |
+| `taxonomy.py` | Spec §3.2 entity→rank table as data (`Taxonomy.default()`); CNIC constants (`CNIC_ENTITY_TYPE`, `CNIC_RESTRICTED_COUNT = 3`); unknown entity types raise `ValueError` |
+| `policy.py` | `can_access(user, doc, action)` — two-axis gate (#25): tenant → deletion → clearance rank → department visibility; `aggregate_level(findings, tax)` — max-wins with Internal floor (#8/#9); CNIC escalates count-aware to Restricted at ≥ 3 hits |
+
+Checks: `.venv/Scripts/python.exe -m pytest tests/domain -q` · `-m mypy app/domain` · `-m ruff check app/domain tests/domain`. The DB `check_monotonic` trigger remains the authority for level monotonicity; `aggregate_level` only proposes.
+
