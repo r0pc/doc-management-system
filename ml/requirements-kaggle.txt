@@ -1,0 +1,16 @@
+# Kaggle notebook dependencies for training the DMS classifiers.
+# Install with: !pip install -q -r requirements-kaggle.txt
+# All computation happens on the Kaggle VM; no document text is sent anywhere.
+
+# Neural network runtime required by sentence-transformers (inference only, embeddings).
+torch
+# Self-hosted embedding model loader: BAAI/bge-small-en-v1.5 (384-dim sentence embeddings).
+sentence-transformers
+# Calibrated logistic regression heads + train/test split + recall metrics.
+scikit-learn
+# Serialization format of the model artifact consumed by the backend loader (Wave 2.C).
+joblib
+# Dataset loading (dataset.csv produced by export_training_data.py) and metrics framing.
+pandas
+# Numeric backend for scikit-learn / torch tensor conversions.
+numpy

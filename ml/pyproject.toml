@@ -1,0 +1,22 @@
+[project]
+name = "dms-ml-tooling"
+version = "0.1.0"
+description = "Synthetic corpus generation and Kaggle training toolkit for the Secure DMS classifiers."
+requires-python = ">=3.11"
+dependencies = [
+    "faker>=30",
+    "fpdf2>=2.7",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+
+[tool.mypy]
+ignore_missing_imports = true
+strict = false
