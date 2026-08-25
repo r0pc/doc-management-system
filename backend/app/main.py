@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.v1 import dev_storage, documents, uploads
+from app.api.v1 import admin, audit, dev_storage, documents, events, review, search, uploads
 from app.api.v1.errors import register_error_handlers
 from app.config import Settings, validate_runtime
 
@@ -34,6 +34,11 @@ def create_app() -> FastAPI:
 
     app.include_router(uploads.router, prefix="/v1")
     app.include_router(documents.router, prefix="/v1")
+    app.include_router(search.router, prefix="/v1")
+    app.include_router(review.router, prefix="/v1")
+    app.include_router(audit.router, prefix="/v1")
+    app.include_router(admin.router, prefix="/v1")
+    app.include_router(events.router, prefix="/v1")
     # D8: the HMAC-verified local-storage router exists only in dev backends.
     if settings.storage_backend == "local":
         app.include_router(dev_storage.router, prefix="/v1")
