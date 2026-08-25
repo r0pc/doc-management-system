@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.v1 import dev_storage, documents, uploads
+from app.api.v1.errors import register_error_handlers
 from app.config import Settings, validate_runtime
 
 
@@ -22,13 +24,19 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    settings = Settings()
     app = FastAPI(title="Secure Document Management System", lifespan=_lifespan)
+    register_error_handlers(app)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    # TODO(Wave 1+): app.include_router(api_v1_router, prefix="/v1")
+    app.include_router(uploads.router, prefix="/v1")
+    app.include_router(documents.router, prefix="/v1")
+    # D8: the HMAC-verified local-storage router exists only in dev backends.
+    if settings.storage_backend == "local":
+        app.include_router(dev_storage.router, prefix="/v1")
     return app
 
 
