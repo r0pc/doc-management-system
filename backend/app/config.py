@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 
     env: Literal["dev", "prod"] = "dev"
-    database_url: str = "postgresql+psycopg://docmgmt:docmgmt@localhost:5432/docmgmt"
+    database_url: str = "postgresql+psycopg://docmgmt:docmgmt@localhost:55432/docmgmt"
     redis_url: str = "redis://localhost:6379/0"
 
     storage_backend: Literal["local", "minio"] = "local"

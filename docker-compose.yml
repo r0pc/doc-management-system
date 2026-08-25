@@ -2,8 +2,12 @@
 # Bare `docker compose up -d` works without a .env file: every variable uses
 # ${VAR:-default} interpolation. Copy .env.example to .env to override.
 #
-# TODO(Wave 2.A): replace direct api/worker commands with the shared
-# scripts/entrypoint-api.sh bootstrap (migrations + wait-for-infra).
+# api/worker/worker-ocr share one image and boot through
+# backend/scripts/entrypoint-api.sh, which waits for Postgres and applies
+# migrations before exec'ing the service command (pipeline invariant #4:
+# job state must be answerable from SQL, so the schema must exist first).
+# The read-only scripts mount bridges the gap until the Dockerfile COPYs
+# scripts/ into the image.
 
 services:
   postgres:
@@ -13,7 +17,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docmgmt}
       POSTGRES_DB: ${POSTGRES_DB:-docmgmt}
     ports:
-      - "5432:5432"
+      - "55432:5432"  # host 5432 is occupied by a native Windows PostgreSQL service on this machine
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -75,6 +79,11 @@ services:
     init: true
     ports:
       - "8000:8000"
+    entrypoint: ["./scripts/entrypoint-api.sh"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      # TODO(Dockerfile): COPY scripts/ in the image and drop this mount.
+      - ./backend/scripts:/srv/app/scripts:ro
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
@@ -94,8 +103,11 @@ services:
   worker:
     build: ./backend
     init: true
-    entrypoint: ["celery"]
-    command: ["-A", "app.workers.celery_app.celery_app", "worker", "-Q", "default", "-l", "info", "--pool=solo"] # pool=solo dev-only; prod uses prefork/gevent
+    entrypoint: ["./scripts/entrypoint-api.sh"]
+    command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "default", "-l", "info", "--pool=solo"] # pool=solo dev-only; prod uses prefork/gevent
+    volumes:
+      # TODO(Dockerfile): COPY scripts/ in the image and drop this mount.
+      - ./backend/scripts:/srv/app/scripts:ro
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
@@ -115,8 +127,11 @@ services:
   worker-ocr:
     build: ./backend
     init: true
-    entrypoint: ["celery"]
-    command: ["-A", "app.workers.celery_app.celery_app", "worker", "-Q", "ocr", "-l", "info", "--pool=solo"] # dedicated OCR queue; never merge with default
+    entrypoint: ["./scripts/entrypoint-api.sh"]
+    command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "ocr", "-l", "info", "--pool=solo"] # dedicated OCR queue; never merge with default
+    volumes:
+      # TODO(Dockerfile): COPY scripts/ in the image and drop this mount.
+      - ./backend/scripts:/srv/app/scripts:ro
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
