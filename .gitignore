@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local storage backend data (dev LocalStorage root)
+backend/storage-data/
