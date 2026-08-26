@@ -117,6 +117,7 @@ class FakePipelineStore:
         self._classification_index: dict[tuple[str, str], uuid.UUID] = {}
         self.text_upserts: list[dict[str, object]] = []
         self.ready_documents: list[uuid.UUID] = []
+        self.failed_documents: list[uuid.UUID] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for name in (
@@ -126,6 +127,7 @@ class FakePipelineStore:
             "record_classification",
             "upsert_document_text",
             "mark_document_ready",
+            "mark_document_failed",
         ):
             monkeypatch.setattr(tasks, name, getattr(self, name))
 
@@ -159,6 +161,9 @@ class FakePipelineStore:
 
     def mark_document_ready(self, sessions: object, document_id: uuid.UUID) -> None:
         self.ready_documents.append(document_id)
+
+    def mark_document_failed(self, sessions: object, *, document_id: uuid.UUID) -> None:
+        self.failed_documents.append(document_id)
 
 
 @pytest.fixture

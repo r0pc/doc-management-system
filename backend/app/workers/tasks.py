@@ -47,6 +47,7 @@ from app.workers.jobs import (
     ProcessingJobsJournal,
     get_sync_sessions,
     load_version_context,
+    mark_document_failed,
     mark_document_ready,
     promote_blob_record,
     record_classification,
@@ -355,6 +356,9 @@ def _run_stage(
         raise Ignore() from None
     except MalwareDetectedError as detected:
         journal.mark_failed(job_row_id, f"malware detected: {detected.signature}")
+        # The chain halts here for good: flip the document out of 'processing'
+        # so the halt is visible on the documents row itself (#4).
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except ShaMismatchError:
         journal.mark_failed(job_row_id, "quarantined bytes do not match recorded sha256")

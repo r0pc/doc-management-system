@@ -359,3 +359,17 @@ def upsert_document_text(
 def mark_document_ready(sessions: sessionmaker[Session], document_id: uuid.UUID) -> None:
     with sessions() as session, session.begin():
         session.execute(update(Document).where(Document.id == document_id).values(status="ready"))
+
+
+def mark_document_failed(sessions: sessionmaker[Session], *, document_id: uuid.UUID) -> None:
+    """Terminal-failure flip so a halted chain never leaves 'processing' rows.
+
+    Pipeline state must be answerable from SQL (#4): a malware halt journals
+    the scan stage AND flips documents.status to 'failed' (an allowed value of
+    the status_valid check) so operators see the outcome without joining
+    processing_jobs.
+    """
+    with sessions() as session, session.begin():
+        session.execute(
+            update(Document).where(Document.id == document_id).values(status="failed")
+        )
