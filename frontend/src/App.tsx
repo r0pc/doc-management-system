@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { queryClient } from './lib/query-client';
 import { AuthProvider } from './api/auth';
+import { ThemeProvider } from './components/theme/ThemeProvider';
 import { api } from './api/client';
 import { ReviewQueueItem, CursorPaginated } from './api/types';
 import { AppLayout } from './components/layout/AppLayout';
@@ -54,9 +55,11 @@ function AppContent() {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
+      <ThemeProvider defaultTheme="system">
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

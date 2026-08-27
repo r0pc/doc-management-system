@@ -16,7 +16,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   children,
 }) => {
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
       <Navbar />
       <div className="flex flex-1">
         <Sidebar
