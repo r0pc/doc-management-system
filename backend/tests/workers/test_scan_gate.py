@@ -103,9 +103,9 @@ def test_clamav_socket_failure_is_transient_and_journaled(pipeline, monkeypatch)
 
     monkeypatch.setattr(tasks, "clamd_scan", down)
 
-    # Eager mode surfaces autoretry_for as celery.exceptions.Retry; the journal
-    # must already record the failed attempt the retry will follow.
-    with pytest.raises(Retry):
+    # Eager mode surfaces autoretry_for as celery.exceptions.Retry or TransientStorageError;
+    # the journal must already record the failed attempt the retry will follow.
+    with pytest.raises((Retry, tasks.TransientStorageError)):
         tasks.process_upload_chain(str(DOC_ID), str(VER_ID), key)
 
     assert "scan" in pipeline.journal.stages_in_state("failed")

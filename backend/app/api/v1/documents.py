@@ -378,7 +378,11 @@ async def _load_reclassify_context(
 
 async def _resolve_level_id(session: AsyncSession, name: LevelName) -> uuid.UUID | None:
     row = (
-        await session.execute(select(SecurityLevel.id).where(SecurityLevel.name == name.value))
+        await session.execute(
+            select(SecurityLevel.id).where(
+                func.lower(SecurityLevel.name) == name.value.lower()
+            )
+        )
     ).first()
     return row[0] if row else None
 

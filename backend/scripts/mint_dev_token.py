@@ -1,3 +1,4 @@
+# ruff: noqa: T201
 """Mint a dev JWT for e2e harnesses and manual testing.
 
 Prints one HS256 token on stdout built from the given claims. The signing

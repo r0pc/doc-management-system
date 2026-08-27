@@ -8,14 +8,17 @@ sidecar on another port). Throwaway databases are created per session and
 dropped afterwards - nothing outside them is touched.
 """
 
-from __future__ import annotations
-
+import asyncio
 import os
 import secrets
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlparse
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import psycopg
 import pytest

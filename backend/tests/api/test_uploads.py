@@ -306,8 +306,11 @@ def test_missing_worker_chain_is_503(
     captured: dict[str, Any] = {}
     patch_intent_persistence(monkeypatch, captured)
     patch_complete_persistence(monkeypatch, captured)
-    # No fake installed: the real app.workers.tasks module has no
-    # process_upload_chain symbol yet (Wave 3), so the import fails -> 503.
+
+    def _failing_enqueue(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("Worker unavailable")
+
+    monkeypatch.setattr("app.api.v1.uploads._enqueue_chain", _failing_enqueue)
 
     client = client_factory(user=make_user(role="employee"))
     assert post_intent(client, filename="a.pdf", size_bytes=len(PDF_BYTES)).status_code == 201

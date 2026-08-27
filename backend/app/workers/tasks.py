@@ -41,7 +41,7 @@ from app.extraction.base import NeedsOcrError, ParserUnavailable, UnknownMimeErr
 from app.extraction.keywords import FrequencyFallback
 from app.extraction.registry import extract_document
 from app.storage.base import BlobExistsError, Storage
-from app.storage.keys import bucket_name, derived_key, primary_key
+from app.storage.keys import bucket_name, derived_key, primary_key, quarantine_key
 from app.storage.local import LocalStorage
 from app.workers.jobs import (
     ProcessingJobsJournal,
@@ -65,6 +65,8 @@ class RegisteredTask(Protocol):
     def __call__(self, *args: object, **kwargs: object) -> object: ...
 
     def s(self, *args: object) -> object: ...
+
+    def delay(self, *args: object, **kwargs: object) -> object: ...
 
     def apply_async(
         self,
@@ -369,7 +371,7 @@ def _run_stage(
     except UnknownMimeError:
         journal.mark_failed(job_row_id, "content matched no known signature")
         raise
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         journal.mark_failed(job_row_id, "unsupported or malformed content")
         raise
     except ParserUnavailable:
@@ -429,11 +431,15 @@ def enqueue_ocr(ctx: PipelineCtx) -> None:
 
 
 @pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
-def process_upload_chain(document_id: str, version_id: str, blob_key_or_data_ref: str) -> None:
+def process_upload_chain(
+    document_id: str, version_id: str, blob_key_or_data_ref: str | None = None
+) -> None:
     """Entry point: resolve ctx from the DB, then fire the fixed chain (#3)."""
     tenant_id, sha256 = load_version_context(
         _sessions(), uuid.UUID(document_id), uuid.UUID(version_id)
     )
+    if blob_key_or_data_ref is None:
+        blob_key_or_data_ref = quarantine_key(tenant_id, uuid.UUID(document_id))
     ctx = PipelineCtx(
         document_id=document_id,
         version_id=version_id,
@@ -442,11 +448,27 @@ def process_upload_chain(document_id: str, version_id: str, blob_key_or_data_ref
         bucket=bucket_name("quarantine"),
         key=blob_key_or_data_ref,
     )
-    chain(
-        scan_for_malware.s(),
-        extract_text.s(),
-        extract_keywords.s(),
-        embed.s(),
-        classify.s(),
-        build_index.s(),
-    ).apply_async(args=[dict(ctx)])
+    from app.workers.celery_app import celery_app
+
+    if celery_app.conf.task_always_eager:
+        curr_ctx: dict[str, object] = dict(ctx)
+        for stage_fn in (
+            scan_for_malware,
+            extract_text,
+            extract_keywords,
+            embed,
+            classify,
+            build_index,
+        ):
+            res = stage_fn(curr_ctx)
+            if isinstance(res, dict):
+                curr_ctx = res
+    else:
+        chain(
+            scan_for_malware.s(),
+            extract_text.s(),
+            extract_keywords.s(),
+            embed.s(),
+            classify.s(),
+            build_index.s(),
+        ).apply_async(args=[dict(ctx)])

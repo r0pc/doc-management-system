@@ -216,8 +216,7 @@ def _enqueue_chain(document_id: uuid.UUID, version_id: uuid.UUID) -> None:
     """
     from app.workers.tasks import process_upload_chain
 
-    # celery's dynamic task proxy carries no stubs; .delay exists at runtime.
-    process_upload_chain.delay(str(document_id), str(version_id))  # type: ignore[attr-defined]
+    process_upload_chain.delay(str(document_id), str(version_id))
 
 
 @router.post("", status_code=201, response_model=UploadIntentResponse)

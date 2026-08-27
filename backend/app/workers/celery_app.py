@@ -15,6 +15,8 @@ celery_app = Celery(
     broker=settings.redis_url,
     include=["app.workers.tasks"],
 )
+celery_app.set_default()
+celery_app.set_current()
 
 celery_app.conf.update(
     task_default_queue="default",

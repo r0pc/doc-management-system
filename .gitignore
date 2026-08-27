@@ -219,3 +219,4 @@ __marimo__/
 
 # Local storage backend data (dev LocalStorage root)
 backend/storage-data/
+.omo/
