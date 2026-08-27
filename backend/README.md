@@ -2,85 +2,111 @@
 
 FastAPI + Celery backend for the Secure Document Management System. One codebase, one image; the API and all workers import the same `app/` package.
 
-## Interpreter / environment
+---
 
-- **Chosen interpreter: host CPython 3.14.4** (`C:\Python314\python.exe`). `py -0p` listed **only** 3.14 — no 3.11–3.13 was available via the `py` launcher, so `.venv` was created with `python -m venv .venv` from the host interpreter.
-- Venv location: `backend/.venv` (gitignored). Activate in git-bash: `source .venv/Scripts/activate`.
-- Installed extras: core + `parsers` + `dev`. All parser wheels resolved on 3.14 (pymupdf 1.28.2 ships cp314 wheels) — nothing skipped.
-- The Docker image uses `python:3.12-slim`, independent of the host venv.
-- `[build-system]` uses setuptools solely so `pip install ".[parsers,dev]"` can resolve dependency sets; the wheel ships zero modules (`packages = []`) because `app` is imported from the working directory, never site-packages.
+## Interpreter & Environment
 
-## Tooling
+- **Host Interpreter**: CPython 3.14.4 (Windows 11). Virtual environment at `backend/.venv`.
+- **Container Environment**: `python:3.12-slim` (see [`Dockerfile`](Dockerfile)).
+- **Database Port**: Published on host port **55432** to avoid collision with native Windows PostgreSQL services.
+- **Worker Configuration**: Local dev workers use `--pool=solo`; production deployment uses prefork/gevent pools.
+
+---
+
+## Commands
 
 ```bash
-python -m ruff check .        # lint
-python -m ruff format .       # format (line length 100, double quotes)
-python -m mypy app            # strict type check
-python -m pytest -q           # hermetic tests; integration marker excluded by default
-alembic revision --autogenerate -m "..."   # no versions exist until Wave 2.A
+# Environment setup
+source .venv/Scripts/activate          # git-bash
+pip install -e ".[parsers,dev]"
+
+# Migrations
+alembic upgrade head                   # apply all schema & security migrations
+alembic downgrade base                 # test reversible DDL
+alembic upgrade head
+
+# Quality Gates
+ruff check . && ruff format --check .  # linting & formatting
+mypy app                               # strict typecheck (61 source files clean)
+pytest -q                              # hermetic test suite (466 passed)
+pytest -m integration -v               # live infra integration suite (6 passed)
+
+# Local Development Servers
+uvicorn app.main:app --reload --port 8000
+celery -A app.workers.celery_app worker -Q default -l info --pool=solo
+celery -A app.workers.celery_app worker -Q ocr -l info --pool=solo
 ```
 
-## Layout
+---
+
+## Package Layout
 
 ```
-app/
-  __init__.py
-  config.py          # frozen pydantic-settings; validate_runtime() fail-closed guard
-  main.py            # app factory, GET /healthz
-  deps.py            # request dependencies (placeholder, later waves)
-  api/v1/            # routers (empty, later waves)
-  classification/    # rules/, ml/ (llm deliberately omitted this wave)
-  db/base.py         # DeclarativeBase + naming_convention
-  domain/            # policy/taxonomy/models (later waves)
-  extraction/        # pdf/docx/xlsx/ocr parsers (later waves)
-  search/            # hybrid search (later waves)
-  security/          # auth/permissions/audit (later waves)
-  storage/           # local/minio backends (later waves)
+backend/app/
+  api/
+    deps.py              # Tenant-scoped session factories, auth verifiers, audit helper
+    v1/
+      uploads.py         # Presigned upload intent (S2), completion, blob promotion
+      documents.py       # Document views, range-streaming content (S5), reclassify
+      review.py          # Review queue listing, human resolution (S4), check_monotonic
+      search.py          # Hybrid keyword + vector search with pre-filtering (Invariants #27, #28)
+      audit.py           # Read-only audit log inspection (Invariant #24)
+      admin.py           # Taxonomy management (DocType / SecurityLevel CRUD)
+      events.py          # 501 SSE placeholder
+      dev_storage.py     # Local storage presigned URL dispatcher
+      errors.py          # Uniform RFC 7807 problem details & cross-tenant 404 parity (#31)
+  classification/
+    pipeline.py          # Stage coordination: rules -> ml -> review queue
+    rules/
+      recognizers/       # Luhn card, CNIC province, IBAN, Passport recognizers
+    ml/
+      loader.py          # CalibratedClassifierCV v1 artifact contract loader
+  db/
+    base.py              # DeclarativeBase with strict naming conventions
+    models.py            # 16 spec §6 SQLAlchemy models (deferred FK #22, non-PK rank #23)
+    session.py           # AsyncEngine & tenant session opener with RLS GUC binding
+  domain/
+    policy.py            # Pure two-axis access control & monotonic aggregation (#8, #25)
+    taxonomy.py          # Entity-to-rank mappings & CNIC threshold constants
+    models.py            # Frozen value objects, Action enum, UserCtx, Finding
+  extraction/
+    registry.py          # Handler resolution by sniffed MIME
+    sniff.py             # Magic-bytes sniffing via puremagic (#19)
+    pdf.py               # PyMuPDF extractor with OCR routing fallback
+    docx.py              # Structural python-docx parser
+    xlsx.py              # Structural openpyxl parser
+    keywords.py          # spaCy / fallback TF-IDF keyword extractor
+  search/
+    hybrid.py            # Reciprocal Rank Fusion (k=60) with pre-ranking visibility filter
+  security/
+    auth.py              # Cached OIDC JWKS verifier (#7) + dev JWT shim
+    permissions.py       # Role -> Action permission matrix (PREVIEW != DOWNLOAD #18)
+    audit.py             # Same-transaction audit write contracts (#30)
+  storage/
+    base.py              # Storage protocol & PrimaryBlobGuard immutability mixin (#16)
+    local.py             # HMAC-signed dev storage backend
+    s3.py                # S3 / MinIO production storage backend
+    keys.py              # Deterministic storage key generator
   workers/
-    celery_app.py    # Celery("docmgmt"); default + ocr queues, task_routes
-    tasks.py         # pipeline stages (Wave 3)
-alembic/
-  env.py             # URL injected from Settings.sync_db_url, never hardcoded
-  script.py.mako
-  versions/          # empty by design until Wave 2.A
-tests/
-  test_health.py     # /healthz smoke test (runs without any infra)
-Dockerfile           # python:3.12-slim; ENTRYPOINT uvicorn, CMD args appended
-pyproject.toml
+    celery_app.py        # Celery app initialization with queue routing (default vs ocr)
+    tasks.py             # 6-stage canvas: scan -> extract -> keywords -> embed -> classify -> index
+    jobs.py              # Transactional processing_jobs state journal (#4)
+    scanning.py          # ClamAV INSTREAM socket client
 ```
 
-## Configuration reference (`app/config.py`)
+---
 
-| Field | Type | Default | Notes |
+## Configuration Reference (`app/config.py`)
+
+| Setting | Type | Default | Description |
 |---|---|---|---|
-| `env` | `"dev" \| "prod"` | `"dev"` | prod requires `scan_enabled=true` or startup fails |
-| `database_url` | str | `postgresql+psycopg://docmgmt:docmgmt@localhost:5432/docmgmt` | psycopg3 dialect serves sync + async |
-| `sync_db_url` | property | derived | normalises async dialects to `+psycopg` for Alembic/Celery engines |
-| `redis_url` | str | `redis://localhost:6379/0` | Celery broker |
-| `storage_backend` | `"local" \| "minio"` | `"local"` | filesystem backend keeps tests hermetic |
-| `minio_endpoint` | str | `localhost:9000` | self-hosted only |
-| `minio_access_key` | str | `minioadmin` | compose/dev default |
-| `minio_secret_key` | str | `minioadmin` | change before any real deployment |
-| `minio_secure` | bool | `false` | TLS toggle |
-| `minio_bucket_prefix` | str | `"docs-"` | buckets: `docs-quarantine/docs-primary/docs-derived` |
-| `scan_enabled` | bool | `false` | ClamAV scanning; mandatory true in prod |
-| `dev_jwt_secret` | str | `dev-only-secret-change-me` | dev shim; OIDC replaces it later |
-| `oidc_issuer` | str \| None | `None` | Keycloak issuer URL |
-| `oidc_audience` | str \| None | `None` | expected token audience |
-| `upload_max_bytes` | int | `104857600` | 100 MiB upload cap |
-| `presign_ttl_seconds` | int | `90` | clamped to 60..120 by validator |
-
-Settings read `.env` (cwd-relative), no env prefix, unknown keys ignored. Frozen after construction.
-
-## Domain
-
-`app/domain/` is the pure security core — the single source of truth both the API and workers import for every authorisation decision and label aggregation. No framework imports (no web, no ORM), no I/O, fully deterministic; `tests/domain/test_purity.py` enforces this by scanning module sources.
-
-| Module | Owns |
-|---|---|
-| `models.py` | Frozen value objects: `LevelName`, `LEVEL_RANK`, `DEFAULT_FLOOR_RANK = 2` (Internal floor — absence of evidence defaults UP), `Finding` (char offsets only, never matched text), `UserCtx`, `DocumentRef`, `Action` |
-| `taxonomy.py` | Spec §3.2 entity→rank table as data (`Taxonomy.default()`); CNIC constants (`CNIC_ENTITY_TYPE`, `CNIC_RESTRICTED_COUNT = 3`); unknown entity types raise `ValueError` |
-| `policy.py` | `can_access(user, doc, action)` — two-axis gate (#25): tenant → deletion → clearance rank → department visibility; `aggregate_level(findings, tax)` — max-wins with Internal floor (#8/#9); CNIC escalates count-aware to Restricted at ≥ 3 hits |
-
-Checks: `.venv/Scripts/python.exe -m pytest tests/domain -q` · `-m mypy app/domain` · `-m ruff check app/domain tests/domain`. The DB `check_monotonic` trigger remains the authority for level monotonicity; `aggregate_level` only proposes.
-
+| `env` | `"dev" \| "prod"` | `"dev"` | Environment mode; prod enforces `scan_enabled=true` at startup |
+| `database_url` | `str` | `postgresql+psycopg://docmgmt:docmgmt@localhost:55432/docmgmt` | PostgreSQL 16 connection URL |
+| `redis_url` | `str` | `redis://localhost:6379/0` | Celery Redis broker URL |
+| `storage_backend` | `"local" \| "minio"` | `"local"` | Storage driver backend |
+| `minio_endpoint` | `str` | `localhost:9000` | MinIO endpoint |
+| `minio_bucket_prefix` | `str` | `"docs-"` | Prefix for quarantine, primary, derived buckets |
+| `scan_enabled` | `bool` | `true` | ClamAV scanning toggle |
+| `upload_max_bytes` | `int` | `10000000` | Maximum upload size in bytes (10 MB default) |
+| `presign_ttl_seconds`| `int` | `90` | Presigned URL expiration (clamped to 60–120s) |
+| `dev_jwt_secret` | `str` | `...` | Secret for dev JWT verification |
