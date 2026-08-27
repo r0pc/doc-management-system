@@ -34,7 +34,4 @@ print(f"entrypoint: postgres unreachable after {tries} attempts: {last_error}",
 sys.exit(1)
 PY
 
-echo "entrypoint: applying database migrations"
-alembic upgrade head
-
 exec "$@"

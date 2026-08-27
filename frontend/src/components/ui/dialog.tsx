@@ -9,10 +9,40 @@ interface DialogProps {
 }
 
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    
+    const activeElement = document.activeElement as HTMLElement;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onOpenChange(false);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.body.style.overflow = 'hidden';
+
+    // Focus close button on mount
+    setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 50);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+      activeElement?.focus();
+    };
+  }, [open, onOpenChange]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(1,4,9,0.75)] backdrop-blur-2xs animate-in fade-in duration-100">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(1,4,9,0.75)] backdrop-blur-2xs animate-in fade-in duration-100"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
+    >
       <div
         className="fixed inset-0"
         onClick={() => onOpenChange(false)}
@@ -20,6 +50,7 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       />
       <div className="relative z-50 w-full max-w-lg rounded-md bg-white dark:bg-[#161b22] text-[#1f2328] dark:text-[#e6edf3] shadow-2xl border border-[#d0d7de] dark:border-[#30363d] overflow-hidden animate-in zoom-in-95 duration-100">
         <button
+          ref={closeButtonRef}
           onClick={() => onOpenChange(false)}
           className="absolute right-3.5 top-3.5 rounded-sm p-1 text-[#656d76] dark:text-[#848d97] hover:text-[#1f2328] dark:hover:text-[#e6edf3] hover:bg-[#eaeef2] dark:hover:bg-[#30363d] transition-colors"
         >
@@ -53,6 +84,7 @@ export function DialogTitle({
 }: React.HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h2
+      id={props.id || "dialog-title"}
       className={cn(
         'text-sm font-semibold leading-none tracking-tight text-[#1f2328] dark:text-[#e6edf3]',
         className

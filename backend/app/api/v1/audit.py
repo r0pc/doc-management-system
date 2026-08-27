@@ -91,6 +91,7 @@ def decode_log_cursor(token: str) -> tuple[datetime, int]:
 
 async def _fetch_audit_page(
     session: AsyncSession,
+    user: UserCtx,
     filters: AuditFilters,
     after: tuple[datetime, int] | None,
     limit_plus_one: int,
@@ -103,7 +104,7 @@ async def _fetch_audit_page(
         AccessLog.ip,
         AccessLog.user_agent,
         AccessLog.ts,
-    )
+    ).where(AccessLog.tenant_id == user.tenant_id)
     if filters.document_id is not None:
         stmt = stmt.where(AccessLog.document_id == filters.document_id)
     if filters.actor_id is not None:
@@ -142,7 +143,7 @@ async def list_audit_log(
     after = decode_log_cursor(cursor) if cursor is not None else None
     filters = AuditFilters(document_id=document_id, actor_id=actor_id, action=action)
     async with sessions(user.tenant_id) as session:
-        rows = await _fetch_audit_page(session, filters, after, effective_limit + 1)
+        rows = await _fetch_audit_page(session, user, filters, after, effective_limit + 1)
     has_more = len(rows) > effective_limit
     page = rows[:effective_limit]
     next_cursor = encode_log_cursor(page[-1].ts, page[-1].id) if has_more and page else None

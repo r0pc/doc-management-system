@@ -198,7 +198,13 @@ def pipeline(
 ) -> SimpleNamespace:
     """Wire every task seam to recording doubles; settings default scan-on dev."""
     store.install(monkeypatch)
-    monkeypatch.setattr(tasks, "_settings", lambda: Settings(env="dev", scan_enabled=True))
+    monkeypatch.setattr(
+        tasks, "_settings",
+        lambda: Settings(
+            env="dev", scan_enabled=True,
+            dev_jwt_secret="test-secret-for-tests",  # noqa: S106
+        ),
+    )
     monkeypatch.setattr(tasks, "_storage", lambda: storage)
     monkeypatch.setattr(tasks, "_journal", lambda: journal)
     return SimpleNamespace(storage=storage, journal=journal, store=store)

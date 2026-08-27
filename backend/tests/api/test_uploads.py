@@ -5,7 +5,6 @@ sha256 derivation, audit actions, broker-failure semantics. Persistence and
 enqueue seams are fakes per the conftest strategy.
 """
 
-import hashlib
 import io
 from datetime import UTC, datetime
 from typing import Any
@@ -64,19 +63,15 @@ def patch_complete_persistence(monkeypatch: pytest.MonkeyPatch, captured: dict[s
         *,
         document_id: UUID,
         actor_id: UUID,
-        result: Any,
     ) -> UUID:
         captured["persist_session"] = session
-        captured["persisted_sha"] = result.sha256
-        captured["persisted_mime"] = result.mime
-        captured["persisted_size"] = result.size_bytes
         return VERSION_ID
 
     async def provision(session: Any, user: Any) -> UUID:
         return ACTOR_ID
 
     monkeypatch.setattr(uploads, "_load_quarantined", load)
-    monkeypatch.setattr(uploads, "_persist_ingest", persist)
+    monkeypatch.setattr(uploads, "_persist_version", persist)
     monkeypatch.setattr(uploads, "_provision_actor", provision)
 
 
@@ -177,14 +172,14 @@ def test_upload_requires_token(raw_client: Any) -> None:
     assert raw_client.post("/v1/uploads", json={}).status_code == 401
 
 
-def test_complete_happy_path_real_ingest(
+def test_complete_happy_path(
     client_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
     blob_storage: Any,
     journal: list[dict[str, Any]],
 ) -> None:
     install_worker_fake(monkeypatch)
-    response, _ = seed_quarantine_and_complete(
+    response, _captured = seed_quarantine_and_complete(
         client_factory,
         monkeypatch,
         blob_storage,
@@ -199,40 +194,7 @@ def test_complete_happy_path_real_ingest(
     assert journal[-1]["session"] is SENTINEL_SESSION
 
 
-def test_misnamed_extension_completes_as_sniffed_pdf(
-    client_factory: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    blob_storage: Any,
-) -> None:
-    """A .txt name carrying PDF bytes completes as application/pdf (#19)."""
-    install_worker_fake(monkeypatch)
-    response, captured = seed_quarantine_and_complete(
-        client_factory,
-        monkeypatch,
-        blob_storage,
-        filename="notes.txt",
-        payload=PDF_BYTES,
-    )
-    assert response.status_code == 200
-    assert captured["persisted_mime"] == "application/pdf"
 
-
-def test_persisted_sha256_matches_payload(
-    client_factory: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    blob_storage: Any,
-) -> None:
-    install_worker_fake(monkeypatch)
-    response, captured = seed_quarantine_and_complete(
-        client_factory,
-        monkeypatch,
-        blob_storage,
-        filename="a.pdf",
-        payload=PDF_BYTES,
-    )
-    assert response.status_code == 200
-    assert captured["persisted_sha"] == hashlib.sha256(PDF_BYTES).hexdigest()
-    assert captured["persisted_size"] == len(PDF_BYTES)
 
 
 def test_enqueue_receives_document_and_version(
@@ -253,22 +215,7 @@ def test_enqueue_receives_document_and_version(
     assert calls == [(document_id, str(VERSION_ID))]
 
 
-def test_size_mismatch_is_413(
-    client_factory: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    blob_storage: Any,
-) -> None:
-    install_worker_fake(monkeypatch)
-    response, _ = seed_quarantine_and_complete(
-        client_factory,
-        monkeypatch,
-        blob_storage,
-        filename="a.pdf",
-        payload=PDF_BYTES,
-        declared_size=len(PDF_BYTES) + 5,
-    )
-    assert response.status_code == 413
-    assert response.headers["content-type"] == "application/problem+json"
+
 
 
 def test_broker_down_returns_503_but_state_committed(
@@ -294,7 +241,7 @@ def test_broker_down_returns_503_but_state_committed(
     assert response.status_code == 503
     assert response.headers["content-type"] == "application/problem+json"
     # persistence + audit happened BEFORE the enqueue attempt (same-tx commit)
-    assert "persisted_sha" in captured
+    assert "persist_session" in captured
     assert journal[-1]["action"] == "upload.complete"
 
 

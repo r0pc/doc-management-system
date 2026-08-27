@@ -12,7 +12,6 @@ import pytest
 from app.api.v1 import documents, uploads
 from app.storage.base import BlobExistsError, ImmutableKeyError
 from tests.api.conftest import install_worker_fake, make_user
-from tests.api.test_uploads import drive_complete, seed_quarantine_and_complete
 
 PROBLEM_TYPE = "application/problem+json"
 
@@ -82,20 +81,31 @@ def test_unexpected_exception_is_sanitised_500(
     assert "passwd" not in response.text
 
 
+def _drive_with_raiser(client: Any, monkeypatch: pytest.MonkeyPatch, raiser: Any) -> Any:
+    from tests.api.test_uploads import DOC_ID, patch_complete_persistence
+
+    captured: dict[str, Any] = {}
+    patch_complete_persistence(monkeypatch, captured)
+    monkeypatch.setattr(uploads, "_persist_version", raiser)
+    install_worker_fake(monkeypatch)
+    return client.post(f"/v1/uploads/{DOC_ID}/complete")
+
+
 def test_unknown_mime_maps_to_422(
     client_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
-    blob_storage: Any,
-    journal: list[dict[str, Any]],
 ) -> None:
-    install_worker_fake(monkeypatch)
-    response, _ = seed_quarantine_and_complete(
-        client_factory,
-        monkeypatch,
-        blob_storage,
-        filename="blob.bin",
-        payload=b"\x00\x01\x02not-a-known-signature",
-    )
+    from app.extraction.sniff import UnknownMimeError
+    async def raiser(
+        session: Any,
+        *,
+        document_id: Any,
+        actor_id: Any,
+    ) -> Any:
+        raise UnknownMimeError("test")
+
+    client = client_factory(user=make_user(role="employee"))
+    response = _drive_with_raiser(client, monkeypatch, raiser)
     body = problem_of(response)
     assert response.status_code == 422
     assert body["title"] == "Unprocessable Entity"
@@ -107,19 +117,16 @@ def test_storage_conflicts_map_to_409(
     monkeypatch: pytest.MonkeyPatch,
     error_cls: type[Exception],
 ) -> None:
-    def raiser(
-        storage: Any,
-        key: str,
+    async def raiser(
+        session: Any,
         *,
-        declared_size: int | None,
-        max_bytes: int,
-        tenant_id: Any,
+        document_id: Any,
+        actor_id: Any,
     ) -> Any:
-        raise error_cls(key)
+        raise error_cls("key")
 
-    monkeypatch.setattr(uploads, "_ingest_bytes", raiser)
     client = client_factory(user=make_user(role="employee"))
-    response = drive_complete(client, monkeypatch)
+    response = _drive_with_raiser(client, monkeypatch, raiser)
     body = problem_of(response)
     assert response.status_code == 409
     assert body["title"] == "Conflict"
@@ -130,18 +137,15 @@ def test_file_not_found_maps_to_canonical_404(
 ) -> None:
     from app.api.v1.errors import not_found
 
-    def raiser(
-        storage: Any,
-        key: str,
+    async def raiser(
+        session: Any,
         *,
-        declared_size: int | None,
-        max_bytes: int,
-        tenant_id: Any,
+        document_id: Any,
+        actor_id: Any,
     ) -> Any:
-        raise FileNotFoundError(key)
+        raise FileNotFoundError("key")
 
-    monkeypatch.setattr(uploads, "_ingest_bytes", raiser)
     client = client_factory(user=make_user(role="employee"))
-    response = drive_complete(client, monkeypatch)
+    response = _drive_with_raiser(client, monkeypatch, raiser)
     assert response.status_code == 404
     assert response.content == not_found().body

@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { DocumentView, SecurityLevelName } from '../../api/types';
+import { DocumentListItem, SecurityLevelName } from '../../api/types';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
 import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { ShieldCheck, AlertTriangle } from 'lucide-react';
 
 interface ReclassifyModalProps {
-  document: DocumentView | null;
+  document: DocumentListItem | null;
   onClose: () => void;
 }
 
@@ -19,17 +19,16 @@ export const ReclassifyModal: React.FC<ReclassifyModalProps> = ({
   const queryClient = useQueryClient();
 
   const [targetLevel, setTargetLevel] = useState<SecurityLevelName>(
-    document?.security_level_name || 'internal'
+    (document?.level as SecurityLevelName) || 'Internal'
   );
-  const [docTypeName, setDocTypeName] = useState(document?.doc_type_name || '');
-  const [reason, setReason] = useState('');
+  // Backend expects doc_type_id, we'll just mock null for now since we don't have a picker
+  const [docTypeId, setDocTypeId] = useState<string | null>(null);
   const [error, setError] = useState<any>(null);
 
   React.useEffect(() => {
     if (document) {
-      setTargetLevel(document.security_level_name || 'internal');
-      setDocTypeName(document.doc_type_name || '');
-      setReason('');
+      setTargetLevel((document.level as SecurityLevelName) || 'Internal');
+      setDocTypeId(null); // Reset
       setError(null);
     }
   }, [document]);
@@ -37,10 +36,9 @@ export const ReclassifyModal: React.FC<ReclassifyModalProps> = ({
   const reclassifyMutation = useMutation({
     mutationFn: async () => {
       if (!document) return;
-      return api.post(`/v1/documents/${document.id}/reclassify`, {
-        security_level_name: targetLevel,
-        doc_type_name: docTypeName || undefined,
-        reason: reason || 'Human operator reclassification',
+      return api.post(`/v1/documents/${document.id}/classification`, {
+        level_name: targetLevel.toLowerCase(), // backend LevelName enum is lowercase
+        doc_type_id: docTypeId,
       });
     },
     onSuccess: () => {
@@ -59,8 +57,8 @@ export const ReclassifyModal: React.FC<ReclassifyModalProps> = ({
     reclassifyMutation.mutate();
   };
 
-  const currentLevelName = document?.security_level_name
-    ? document.security_level_name.toLowerCase()
+  const currentLevelName = document?.level
+    ? document.level.toLowerCase()
     : 'internal';
   const isLowering =
     ['restricted', 'confidential'].includes(currentLevelName) &&
@@ -74,7 +72,7 @@ export const ReclassifyModal: React.FC<ReclassifyModalProps> = ({
           Reclassify Document
         </DialogTitle>
         <DialogDescription>
-          Apply a human classification override for: <strong className="text-[#1f2328] dark:text-[#e6edf3]">{document?.title}</strong>
+          Apply a human classification override for: <strong className="text-[#1f2328] dark:text-[#e6edf3]">{document?.filename}</strong>
         </DialogDescription>
       </DialogHeader>
 
@@ -99,38 +97,11 @@ export const ReclassifyModal: React.FC<ReclassifyModalProps> = ({
             onChange={(e) => setTargetLevel(e.target.value as SecurityLevelName)}
             className="w-full h-8 rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
           >
-            <option value="public">Public (Rank 1)</option>
-            <option value="internal">Internal (Rank 2)</option>
-            <option value="confidential">Confidential (Rank 3)</option>
-            <option value="restricted">Restricted (Rank 4)</option>
+            <option value="Public">Public (Rank 1)</option>
+            <option value="Internal">Internal (Rank 2)</option>
+            <option value="Confidential">Confidential (Rank 3)</option>
+            <option value="Restricted">Restricted (Rank 4)</option>
           </select>
-        </div>
-
-        <div>
-          <label className="block font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
-            New Document Type
-          </label>
-          <input
-            type="text"
-            value={docTypeName}
-            onChange={(e) => setDocTypeName(e.target.value)}
-            placeholder="e.g. Contract › Vendor MSA"
-            className="w-full h-8 rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
-          />
-        </div>
-
-        <div>
-          <label className="block font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
-            Justification / Reason (Audited)
-          </label>
-          <textarea
-            rows={2}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Provide legal or operational justification for this change..."
-            required
-            className="w-full rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] p-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
-          />
         </div>
 
         <DialogFooter className="p-0 border-0 pt-2">

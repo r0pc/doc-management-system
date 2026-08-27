@@ -12,10 +12,25 @@ import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { DocumentDrawer } from '../documents/DocumentDrawer';
 import { Search, Sparkles, Filter, FileText } from 'lucide-react';
 
+import { useSearchParams } from 'react-router-dom';
+
 export const SearchPage: React.FC = () => {
-  const [queryInput, setQueryInput] = useState('');
-  const [activeQuery, setActiveQuery] = useState('');
-  const [levelFilter, setLevelFilter] = useState<string>('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeQuery = searchParams.get('q') || '';
+  const levelFilter = searchParams.get('level') || '';
+  
+  const [queryInput, setQueryInput] = useState(activeQuery);
+  const [cursors, setCursors] = useState<string[]>([]);
+  const currentCursor = cursors[cursors.length - 1] ?? undefined;
+
+  const setLevelFilter = (val: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (val) newParams.set('level', val);
+    else newParams.delete('level');
+    setSearchParams(newParams);
+    setCursors([]);
+  };
+
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
 
   const {
@@ -24,20 +39,25 @@ export const SearchPage: React.FC = () => {
     error,
     isFetching,
   } = useQuery({
-    queryKey: ['search', activeQuery, levelFilter],
+    queryKey: ['search', activeQuery, levelFilter, currentCursor],
     queryFn: () =>
-      api.get<SearchResponse>('/v1/search', {
+      api.get<SearchResponse & { next_cursor?: string }>('/v1/search', {
         q: activeQuery,
         security_level: levelFilter || undefined,
         limit: 25,
+        cursor: currentCursor,
       }),
     enabled: !!activeQuery,
   });
+  const nextCursor = searchData?.next_cursor;
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (queryInput.trim()) {
-      setActiveQuery(queryInput.trim());
+      const newParams = new URLSearchParams(searchParams);
+      newParams.set('q', queryInput.trim());
+      setSearchParams(newParams);
+      setCursors([]);
     }
   };
 
@@ -105,10 +125,10 @@ export const SearchPage: React.FC = () => {
                     }`}
                   >
                     <span>All Levels</span>
-                    <span className="font-mono text-[11px]">{searchData?.total || 0}</span>
+                    <span className="font-mono text-[11px]">{searchData?.total_candidates || 0}</span>
                   </button>
-                  {searchData?.facets?.security_levels &&
-                    Object.entries(searchData.facets.security_levels).map(([lvl, count]) => (
+                  {searchData?.facets?.levels &&
+                    Object.entries(searchData.facets.levels).map(([lvl, count]) => (
                       <button
                         key={lvl}
                         type="button"
@@ -151,25 +171,24 @@ export const SearchPage: React.FC = () => {
             ) : searchData?.results && searchData.results.length > 0 ? (
               searchData.results.map((item) => (
                 <Card
-                  key={item.id}
+                  key={item.document_id}
                   className="cursor-pointer hover:border-[#0969da] dark:hover:border-[#2f81f7] transition-all"
-                  onClick={() => setSelectedDocId(item.id)}
+                  onClick={() => setSelectedDocId(item.document_id)}
                 >
                   <CardContent className="p-3.5 space-y-2">
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-0.5">
                         <h4 className="font-semibold text-xs text-[#0969da] dark:text-[#2f81f7] hover:underline flex items-center gap-1.5">
                           <FileText className="w-3.5 h-3.5 text-[#656d76] dark:text-[#848d97] shrink-0" />
-                          <span>{item.title}</span>
+                          <span>{item.filename}</span>
                         </h4>
                         <div className="flex items-center gap-2 text-[11px] text-[#656d76] dark:text-[#848d97]">
                           <LevelBadge
-                            level={item.security_level_name}
-                            rank={item.security_level_rank}
+                            level={item.level}
                           />
                           <span>·</span>
                           <span className="font-medium text-[#1f2328] dark:text-[#e6edf3]">
-                            {item.doc_type_name || 'Unclassified'}
+                            {item.doc_type || 'Unclassified'}
                           </span>
                         </div>
                       </div>
@@ -210,6 +229,28 @@ export const SearchPage: React.FC = () => {
         documentId={selectedDocId}
         onClose={() => setSelectedDocId(null)}
       />
+
+      {/* Pagination Controls */}
+      {activeQuery && searchData && (
+        <div className="flex justify-between items-center pt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCursors((prev) => prev.slice(0, -1))}
+            disabled={cursors.length === 0 || isFetching}
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCursors((prev) => [...prev, nextCursor!])}
+            disabled={!nextCursor || isFetching}
+          >
+            Next
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

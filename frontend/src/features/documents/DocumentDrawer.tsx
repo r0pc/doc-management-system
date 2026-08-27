@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../../api/client';
-import { DocumentView, JobOut, FindingOut } from '../../api/types';
+import { api, getAuthToken } from '../../api/client';
+import { DocumentListItem, JobOut, FindingOut } from '../../api/types';
 import { LevelBadge } from '../../components/common/LevelBadge';
 import { Button } from '../../components/ui/button';
 import { LoadingSkeleton } from '../../components/common/LoadingSkeleton';
 import { ProblemAlert } from '../../components/common/ProblemAlert';
-import { formatBytes, formatDate } from '../../lib/utils';
+import { formatDate } from '../../lib/utils';
 import {
   X,
   Download,
@@ -22,7 +22,7 @@ import { Action } from '../../security/permissions';
 interface DocumentDrawerProps {
   documentId: string | null;
   onClose: () => void;
-  onReclassify?: (doc: DocumentView) => void;
+  onReclassify?: (doc: DocumentListItem) => void;
 }
 
 export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
@@ -32,10 +32,36 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
 }) => {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<any>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!documentId) return;
+
+    const activeElement = document.activeElement as HTMLElement;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.body.style.overflow = 'hidden';
+    
+    // Focus first focusable element
+    setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 50);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = '';
+      // Restore focus
+      activeElement?.focus();
+    };
+  }, [documentId, onClose]);
 
   const { data: doc, isLoading, error } = useQuery({
     queryKey: ['document', documentId],
-    queryFn: () => api.get<DocumentView>(`/v1/documents/${documentId}`),
+    queryFn: () => api.get<DocumentListItem>(`/v1/documents/${documentId}`),
     enabled: !!documentId,
   });
 
@@ -57,9 +83,8 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
       setDownloading(true);
       setDownloadError(null);
 
-      const rank = doc.security_level_rank ?? 2;
-      const levelName = doc.security_level_name ? doc.security_level_name.toLowerCase() : 'internal';
-      const isHighClearance = rank >= 3 || ['confidential', 'restricted'].includes(levelName);
+      const levelName = doc.level ? doc.level.toLowerCase() : 'internal';
+      const isHighClearance = ['confidential', 'restricted'].includes(levelName);
 
       if (isHighClearance) {
         // Streamed directly through API (Invariant #17)
@@ -67,7 +92,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename || doc.title || 'document';
+        a.download = filename || doc.filename || 'document';
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -76,7 +101,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
         // Presigned redirect path
         const res = await fetch(`/v1/documents/${doc.id}/content`, {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem('dms_auth_token') || ''}`,
+            Authorization: `Bearer ${getAuthToken() || ''}`,
           },
           redirect: 'follow',
         });
@@ -85,7 +110,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = doc.title || 'document';
+        a.download = doc.filename || 'document';
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -101,7 +126,12 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
   if (!documentId) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-[rgba(1,4,9,0.75)] backdrop-blur-2xs animate-in fade-in duration-100">
+    <div 
+      className="fixed inset-0 z-50 overflow-hidden bg-[rgba(1,4,9,0.75)] backdrop-blur-2xs animate-in fade-in duration-100"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drawer-title"
+    >
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
         <div className="w-screen max-w-xl bg-white dark:bg-[#161b22] border-l border-[#d0d7de] dark:border-[#30363d] shadow-2xl flex flex-col transition-colors">
@@ -109,11 +139,12 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
           <div className="p-4 sm:p-5 border-b border-[#d0d7de] dark:border-[#30363d] flex items-center justify-between bg-[#f6f8fa] dark:bg-[#161b22]">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-[#656d76] dark:text-[#848d97]" />
-              <h3 className="font-semibold text-sm text-[#1f2328] dark:text-[#e6edf3]">
+              <h3 id="drawer-title" className="font-semibold text-sm text-[#1f2328] dark:text-[#e6edf3]">
                 Document Inspector
               </h3>
             </div>
             <button
+              ref={closeButtonRef}
               onClick={onClose}
               className="p-1 rounded-sm text-[#656d76] dark:text-[#848d97] hover:text-[#1f2328] dark:hover:text-[#e6edf3] hover:bg-[#eaeef2] dark:hover:bg-[#30363d]"
             >
@@ -136,15 +167,14 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h2 className="text-base font-bold text-[#1f2328] dark:text-[#e6edf3]">
-                        {doc.title}
+                        {doc.filename}
                       </h2>
                       <p className="text-[11px] font-mono text-[#656d76] dark:text-[#848d97] mt-0.5">
                         ID: {doc.id}
                       </p>
                     </div>
                     <LevelBadge
-                      level={doc.security_level_name}
-                      rank={doc.security_level_rank}
+                      level={doc.level}
                     />
                   </div>
 
@@ -152,25 +182,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                     <div>
                       <span className="text-[#656d76] dark:text-[#848d97] block text-[11px]">Type:</span>
                       <span className="font-medium text-[#1f2328] dark:text-[#e6edf3]">
-                        {doc.doc_type_name || 'Unclassified'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[#656d76] dark:text-[#848d97] block text-[11px]">File Size:</span>
-                      <span className="font-mono text-[#1f2328] dark:text-[#e6edf3]">
-                        {formatBytes(doc.byte_size || 0)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[#656d76] dark:text-[#848d97] block text-[11px]">MIME:</span>
-                      <span className="font-mono text-[#1f2328] dark:text-[#e6edf3] text-[11px]">
-                        {doc.mime_type || '—'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[#656d76] dark:text-[#848d97] block text-[11px]">Department:</span>
-                      <span className="font-mono text-[#1f2328] dark:text-[#e6edf3] text-[11px] truncate block">
-                        {doc.department_id || '—'}
+                        {doc.doc_type || 'Unclassified'}
                       </span>
                     </div>
                   </div>
@@ -277,7 +289,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
           {doc && (
             <div className="p-4 border-t border-[#d0d7de] dark:border-[#30363d] bg-[#f6f8fa] dark:bg-[#161b22] flex items-center justify-between gap-3">
               <span className="text-[11px] text-[#656d76] dark:text-[#848d97]">
-                Delivery: {(doc.security_level_rank ?? 2) >= 3 ? 'API Stream (Range)' : 'Presigned 303'}
+                Delivery: {['confidential', 'restricted'].includes(doc.level ? doc.level.toLowerCase() : '') ? 'API Stream (Range)' : 'Presigned 303'}
               </span>
               <div className="flex items-center gap-2">
                 <Can action={Action.DOWNLOAD} document={doc}>

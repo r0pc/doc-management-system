@@ -42,6 +42,7 @@ def install_audit_fake(
 
     async def page(
         session: Any,
+        user: Any,
         filters: Any,
         after: tuple[datetime, int] | None,
         limit_plus_one: int,

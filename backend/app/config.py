@@ -6,7 +6,7 @@ Self-hosting invariant: no hosted/cloud service endpoints exist here by design.
 
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 
-    env: Literal["dev", "prod"] = "dev"
+    env: Literal["dev", "prod"] = "prod"
     database_url: str = "postgresql+psycopg://docmgmt:docmgmt@localhost:55432/docmgmt"
     redis_url: str = "redis://localhost:6379/0"
 
@@ -27,12 +27,27 @@ class Settings(BaseSettings):
     minio_bucket_prefix: str = "docs-"
 
     scan_enabled: bool = False
-    dev_jwt_secret: str = "dev-only-secret-change-me"  # noqa: S105 - dev shim only
+    clamav_host: str = "clamav"
+    clamav_port: int = 3310
+
+    cors_origins: list[str] = ["http://localhost:5173"]
+
+    dev_jwt_secret: str = ""
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
 
     upload_max_bytes: int = 104857600
     presign_ttl_seconds: int = 90
+
+    @model_validator(mode="after")
+    def _validate_dev_jwt_secret(self) -> Settings:
+        if self.env == "dev" and (
+            not self.dev_jwt_secret or self.dev_jwt_secret == "dev-only-secret-change-me"  # noqa: S105
+        ):
+            raise ValueError(
+                "DEV_JWT_SECRET must be explicitly set to a strong secret in dev environment"
+            )
+        return self
 
     @field_validator("presign_ttl_seconds")
     @classmethod

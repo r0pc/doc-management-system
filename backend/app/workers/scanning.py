@@ -17,8 +17,11 @@ import struct
 from dataclasses import dataclass
 from typing import Final
 
-CLAMAV_HOST: Final = "127.0.0.1"
-CLAMAV_PORT: Final = 3310
+from app.config import Settings
+
+settings = Settings()
+CLAMAV_HOST: Final = settings.clamav_host
+CLAMAV_PORT: Final = settings.clamav_port
 
 _HANDSHAKE: Final = b"zINSTREAM\0"
 _CHUNK_BYTES: Final = 8192

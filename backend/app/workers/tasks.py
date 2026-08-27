@@ -220,7 +220,7 @@ def _write_derived_json(sha256: str, payload: dict[str, object]) -> None:
 def _promote_to_primary(ctx: PipelineCtx, data: bytes) -> None:
     """Quarantine -> primary promotion: verify, put, record, then delete (#16)."""
     digest = hashlib.sha256(data).hexdigest()
-    if digest != ctx["sha256"]:
+    if ctx["sha256"] is not None and digest != ctx["sha256"]:
         raise ShaMismatchError
     key = primary_key(uuid.UUID(ctx["tenant_id"]), digest)
     from app.extraction.sniff import sniff_mime
@@ -364,27 +364,34 @@ def _run_stage(
         raise
     except ShaMismatchError:
         journal.mark_failed(job_row_id, "quarantined bytes do not match recorded sha256")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except BlobExistsError:
         journal.mark_failed(job_row_id, "primary blob conflict (#16)")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except UnknownMimeError:
         journal.mark_failed(job_row_id, "content matched no known signature")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except (ValueError, TypeError):
         journal.mark_failed(job_row_id, "unsupported or malformed content")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except ParserUnavailable:
         journal.mark_failed(job_row_id, "parser library missing on host")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except IntegrityError:
         journal.mark_failed(job_row_id, "write rejected by database integrity guard (#8)")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except TransientStorageError:
         journal.mark_failed(job_row_id, f"transient failure in {stage}; retry scheduled")
         raise
     except RuntimeError:
         journal.mark_failed(job_row_id, "configuration refuses this stage (fail-closed)")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     journal.mark_succeeded(job_row_id)
     logger.info("stage_complete", extra=_ids(stage, ctx))

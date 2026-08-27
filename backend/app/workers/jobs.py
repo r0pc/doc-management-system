@@ -370,6 +370,4 @@ def mark_document_failed(sessions: sessionmaker[Session], *, document_id: uuid.U
     processing_jobs.
     """
     with sessions() as session, session.begin():
-        session.execute(
-            update(Document).where(Document.id == document_id).values(status="failed")
-        )
+        session.execute(update(Document).where(Document.id == document_id).values(status="failed"))

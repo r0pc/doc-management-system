@@ -22,6 +22,8 @@ CNIC_RESTRICTED_COUNT: Final[int] = 3
 _SPEC_ENTITY_RANKS: Final[Mapping[str, int]] = {
     "card_number": 4,
     CNIC_ENTITY_TYPE: 3,
+    "bank_account": 4,
+    "passport_number": 4,
     "salary_with_named_person": 4,
     "internal_email_domain": 3,
     "named_employee": 2,

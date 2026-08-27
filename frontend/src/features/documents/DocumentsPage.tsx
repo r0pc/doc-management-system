@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { DocumentSummary, DocumentView, CursorPaginated } from '../../api/types';
+import { DocumentListItem } from '../../api/types';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/table';
 import { Button } from '../../components/ui/button';
 import { LevelBadge } from '../../components/common/LevelBadge';
@@ -10,18 +10,38 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { DocumentDrawer } from './DocumentDrawer';
 import { ReclassifyModal } from './ReclassifyModal';
-import { formatBytes, formatDate } from '../../lib/utils';
+import { formatDate } from '../../lib/utils';
 import { FileText, Eye, Filter, RefreshCw, Plus } from 'lucide-react';
 
-interface DocumentsPageProps {
-  onNavigateUpload?: () => void;
-}
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
-export const DocumentsPage: React.FC<DocumentsPageProps> = ({ onNavigateUpload }) => {
-  const [statusFilter, setStatusFilter] = useState<string>('');
-  const [levelFilter, setLevelFilter] = useState<string>('');
+export const DocumentsPage: React.FC = () => {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const statusFilter = searchParams.get('status') || '';
+  const levelFilter = searchParams.get('level') || '';
+  
+  const [cursors, setCursors] = useState<string[]>([]);
+  const currentCursor = cursors[cursors.length - 1] ?? undefined;
+
+  const setStatusFilter = (val: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (val) newParams.set('status', val);
+    else newParams.delete('status');
+    setSearchParams(newParams);
+    setCursors([]); // Reset pagination on filter change
+  };
+
+  const setLevelFilter = (val: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (val) newParams.set('level', val);
+    else newParams.delete('level');
+    setSearchParams(newParams);
+    setCursors([]);
+  };
+
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const [reclassifyingDoc, setReclassifyingDoc] = useState<DocumentView | null>(null);
+  const [reclassifyingDoc, setReclassifyingDoc] = useState<DocumentListItem | null>(null);
 
   const {
     data: documentsData,
@@ -30,18 +50,20 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ onNavigateUpload }
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ['documents', statusFilter, levelFilter],
+    queryKey: ['documents', statusFilter, levelFilter, currentCursor],
     queryFn: () =>
-      api.get<CursorPaginated<DocumentSummary> | DocumentSummary[]>('/v1/documents', {
+      api.get<any>('/v1/documents', {
         status: statusFilter || undefined,
         security_level: levelFilter || undefined,
         limit: 50,
+        cursor: currentCursor,
       }),
   });
 
-  const documents: DocumentSummary[] = Array.isArray(documentsData)
+  const documents: any[] = Array.isArray(documentsData)
     ? documentsData
     : documentsData?.items || [];
+  const nextCursor = !Array.isArray(documentsData) ? documentsData?.next_cursor : null;
 
   return (
     <div className="space-y-4">
@@ -66,12 +88,10 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ onNavigateUpload }
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          {onNavigateUpload && (
-            <Button size="sm" variant="default" onClick={onNavigateUpload}>
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              Upload Document
-            </Button>
-          )}
+          <Button size="sm" variant="default" onClick={() => navigate('/upload')}>
+            <Plus className="w-3.5 h-3.5 mr-1" />
+            Upload Document
+          </Button>
         </div>
       </div>
 
@@ -134,8 +154,8 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ onNavigateUpload }
               ? 'Try changing or clearing your filters to view documents in this scope.'
               : 'Your repository is empty. Upload your first document to start.'
           }
-          actionLabel={onNavigateUpload ? 'Upload Document' : undefined}
-          onAction={onNavigateUpload}
+          actionLabel="Upload Document"
+          onAction={() => navigate('/upload')}
         />
       ) : (
         <div className="bg-white dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] overflow-hidden shadow-2xs transition-colors">
@@ -145,7 +165,6 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ onNavigateUpload }
                 <TableHead className="w-[35%]">Title</TableHead>
                 <TableHead>Security Level</TableHead>
                 <TableHead>Document Type</TableHead>
-                <TableHead>Size</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -161,20 +180,16 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ onNavigateUpload }
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2 text-[#0969da] dark:text-[#2f81f7] hover:underline">
                       <FileText className="w-3.5 h-3.5 text-[#656d76] dark:text-[#848d97] shrink-0" />
-                      <span className="truncate max-w-xs">{doc.title}</span>
+                      <span className="truncate max-w-xs">{doc.filename}</span>
                     </div>
                   </TableCell>
                   <TableCell>
                     <LevelBadge
-                      level={doc.security_level_name}
-                      rank={doc.security_level_rank}
+                      level={doc.level}
                     />
                   </TableCell>
                   <TableCell className="text-[#656d76] dark:text-[#848d97] font-medium">
-                    {doc.doc_type_name || 'Unclassified'}
-                  </TableCell>
-                  <TableCell className="font-mono text-[#656d76] dark:text-[#848d97] text-[11px]">
-                    {formatBytes(doc.byte_size || 0)}
+                    {doc.doc_type || 'Unclassified'}
                   </TableCell>
                   <TableCell>
                     <span
@@ -208,6 +223,26 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ onNavigateUpload }
           </Table>
         </div>
       )}
+
+      {/* Pagination Controls */}
+      <div className="flex justify-between items-center pt-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setCursors((prev) => prev.slice(0, -1))}
+          disabled={cursors.length === 0 || isFetching}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setCursors((prev) => [...prev, nextCursor!])}
+          disabled={!nextCursor || isFetching}
+        >
+          Next
+        </Button>
+      </div>
 
       {/* Drawer */}
       <DocumentDrawer

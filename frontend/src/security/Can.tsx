@@ -1,11 +1,11 @@
 import React from 'react';
 import { Action } from './permissions';
 import { usePermissions } from './usePermissions';
-import { DocumentSummary, DocumentView } from '../api/types';
+import { DocumentListItem } from '../api/types';
 
 export interface CanProps {
   action: Action;
-  document?: DocumentSummary | DocumentView | null;
+  document?: DocumentListItem | null;
   fallback?: React.ReactNode;
   children: React.ReactNode;
 }

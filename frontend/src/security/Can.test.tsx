@@ -36,12 +36,14 @@ describe('Can Component & Permission Matrix', () => {
   it('evaluates document clearance rank against user clearance', () => {
     const restrictedDoc = {
       id: 'doc-1',
+      document_id: 'doc-1',
       tenant_id: DEV_PERSONAS[0].tenantId,
       department_id: DEV_PERSONAS[0].departmentId,
-      title: 'Restricted Doc',
+      filename: 'Restricted Doc',
       created_at: new Date().toISOString(),
       status: 'ready' as const,
-      security_level_rank: 4, // Restricted
+      level: 'restricted',
+      doc_type: 'unknown',
     };
 
     render(

@@ -82,7 +82,7 @@ def test_framing_bytes_exact_zinstream_length_prefixed_chunks(
 
 
 def test_default_host_port_constants_are_clamav_defaults() -> None:
-    assert CLAMAV_HOST == "127.0.0.1"
+    assert CLAMAV_HOST == "clamav"
     assert CLAMAV_PORT == 3310
 
 

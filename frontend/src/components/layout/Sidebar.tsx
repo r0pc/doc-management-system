@@ -10,18 +10,15 @@ import {
 } from 'lucide-react';
 import { Action } from '../../security/permissions';
 import { Can } from '../../security/Can';
+import { NavLink } from 'react-router-dom';
 
 export type NavTab = 'documents' | 'upload' | 'review' | 'search' | 'audit' | 'admin';
 
 interface SidebarProps {
-  currentTab: NavTab;
-  onSelectTab: (tab: NavTab) => void;
   reviewCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
-  currentTab,
-  onSelectTab,
   reviewCount = 0,
 }) => {
   const navItems: Array<{
@@ -53,7 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'search',
       label: 'Hybrid Search',
       icon: <Search className="w-4 h-4" />,
-      action: Action.SEARCH,
+      action: Action.VIEW,
     },
     {
       id: 'audit',
@@ -76,36 +73,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
           Repositories
         </div>
         {navItems.map((item) => {
-          const isSelected = currentTab === item.id;
           const buttonContent = (
-            <button
+            <NavLink
               key={item.id}
-              type="button"
-              onClick={() => onSelectTab(item.id)}
-              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                isSelected
+              to={`/${item.id}`}
+              className={({ isActive }) => `w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                isActive
                   ? 'bg-[#0969da] text-white font-semibold shadow-xs dark:bg-[#1f6feb]'
                   : 'text-[#1f2328] dark:text-[#e6edf3] hover:bg-[#eaeef2] dark:hover:bg-[#21262d]'
               }`}
             >
-              <div className="flex items-center gap-2.5">
-                <span className={isSelected ? 'text-white' : 'text-[#656d76] dark:text-[#848d97]'}>
-                  {item.icon}
-                </span>
-                <span>{item.label}</span>
-              </div>
-              {item.badge !== undefined && item.badge > 0 && (
-                <span
-                  className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
-                    isSelected
-                      ? 'bg-white text-[#0969da]'
-                      : 'bg-[#fff8c5] dark:bg-[#9e6a03]/40 text-[#9a6700] dark:text-[#f2cc60] border border-[#d4a72c]/40'
-                  }`}
-                >
-                  {item.badge}
-                </span>
+              {({ isActive }) => (
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <span className={isActive ? 'text-white' : 'text-[#656d76] dark:text-[#848d97]'}>
+                      {item.icon}
+                    </span>
+                    <span>{item.label}</span>
+                  </div>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
+                        isActive
+                          ? 'bg-white text-[#0969da]'
+                          : 'bg-[#fff8c5] dark:bg-[#9e6a03]/40 text-[#9a6700] dark:text-[#f2cc60] border border-[#d4a72c]/40'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </>
               )}
-            </button>
+            </NavLink>
           );
 
           if (item.action) {

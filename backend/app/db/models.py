@@ -144,7 +144,7 @@ class DocumentVersion(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id"))
-    blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"))
+    blob_sha256: Mapped[str | None] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=True)
     version_no: Mapped[int] = mapped_column(Integer)
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime.datetime] = mapped_column(
@@ -269,6 +269,7 @@ class AccessLog(Base):
     __tablename__ = "access_log"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     document_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     action: Mapped[str] = mapped_column(Text)

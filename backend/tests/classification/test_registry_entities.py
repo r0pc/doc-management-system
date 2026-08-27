@@ -34,9 +34,11 @@ def test_iter_recognizers_yields_all_four() -> None:
     assert len(list(iter_recognizers())) == 4
 
 
-def test_every_scan_is_a_placeholder_returning_empty() -> None:
+def test_every_scan_returns_findings() -> None:
     for recognizer in build_recognizers().values():
-        assert recognizer.scan(BANK_STATEMENT_LIKE) == []
+        findings = recognizer.scan(BANK_STATEMENT_LIKE)
+        assert len(findings) == 1
+        assert findings[0].entity_type == recognizer.entity_type
 
 
 def test_patterns_compile_and_match_their_canonical_shape() -> None:

@@ -88,7 +88,9 @@ def e2e_settings(migrated_db: DbTarget, monkeypatch: pytest.MonkeyPatch) -> Sett
 
 
 @pytest.fixture
-def e2e_storage(tmp_path: Path, e2e_settings: Settings, monkeypatch: pytest.MonkeyPatch) -> LocalStorage:
+def e2e_storage(
+    tmp_path: Path, e2e_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> LocalStorage:
     storage_root = (tmp_path / "e2e_storage").resolve()
     storage_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("DOCMGMT_LOCAL_STORAGE_ROOT", str(storage_root))
@@ -101,7 +103,9 @@ def e2e_storage(tmp_path: Path, e2e_settings: Settings, monkeypatch: pytest.Monk
 
 
 @pytest.fixture
-def eager_pipeline(e2e_settings: Settings, e2e_storage: LocalStorage, monkeypatch: pytest.MonkeyPatch) -> None:
+def eager_pipeline(
+    e2e_settings: Settings, e2e_storage: LocalStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_store_eager_result = True
     celery_app.conf.task_eager_propagates = False
@@ -122,7 +126,9 @@ def e2e_app(
     monkeypatch.setattr("app.db.session._engine", None)
     monkeypatch.setattr("app.db.session._session_factory", None)
     monkeypatch.setattr("app.api.deps._storage_singleton", e2e_storage)
-    monkeypatch.setattr(deps, "get_verifier", lambda: DevJWTVerifier(e2e_settings.dev_jwt_secret, env="dev"))
+    monkeypatch.setattr(
+        deps, "get_verifier", lambda: DevJWTVerifier(e2e_settings.dev_jwt_secret, env="dev")
+    )
     monkeypatch.setattr(deps, "get_settings", lambda: e2e_settings)
 
     return create_app()

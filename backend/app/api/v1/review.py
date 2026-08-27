@@ -38,7 +38,6 @@ from app.api.v1.documents import (
     MAX_PAGE_SIZE,
     DocumentView,
     LabelView,
-    _actor_uuid,
     _apply_human_classification,
     _denied,
     _doc_type_exists,
@@ -255,10 +254,12 @@ async def resolve_review_item(
             doc_type_id=payload.doc_type_id,
         )
         await _close_review_item(session, item_id)
+        actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=context.view.id,
-            actor_id=_actor_uuid(user),
+            actor_id=actor_id,
             action="reclassify.resolve.human",
             request=request,
         )

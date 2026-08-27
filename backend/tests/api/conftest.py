@@ -113,6 +113,7 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     async def spy(
         session: Any,
         *,
+        tenant_id: UUID | None,
         document_id: UUID | None,
         actor_id: UUID | None,
         action: str,
@@ -121,6 +122,7 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         entries.append(
             {
                 "session": session,
+                "tenant_id": tenant_id,
                 "document_id": document_id,
                 "actor_id": actor_id,
                 "action": action,
@@ -130,6 +132,12 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     monkeypatch.setattr(deps, "record_audit", spy)
     return entries
 
+
+@pytest.fixture(autouse=True)
+def mock_provision_actor(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_provision(session: Any, user: UserCtx) -> UUID:
+        return ACTOR_ID
+    monkeypatch.setattr(deps, "provision_actor", fake_provision)
 
 def build_app(
     monkeypatch: pytest.MonkeyPatch,

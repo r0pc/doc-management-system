@@ -6,7 +6,7 @@ export interface UserClaims {
   tenant_id: string;
   department_id?: string;
   department_path?: string;
-  role: 'admin' | 'compliance_officer' | 'employee' | 'auditor';
+  role: 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
   clearance_rank: number;
   email?: string;
   name?: string;
@@ -15,7 +15,7 @@ export interface UserClaims {
 export interface Persona {
   id: string;
   label: string;
-  role: 'admin' | 'compliance_officer' | 'employee' | 'auditor';
+  role: 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
   clearance: number;
   tenantId: string;
   tenantLabel: string;
@@ -29,19 +29,19 @@ export const DEV_PERSONAS: Persona[] = [
     label: 'Alice (Security Admin)',
     role: 'admin',
     clearance: 4,
-    tenantId: '00000000-0000-0000-0000-000000000001',
+    tenantId: 'c0000000-0000-0000-0000-000000000001',
     tenantLabel: 'Acme Corp (T1)',
-    departmentId: '00000000-0000-0000-0000-000000000010',
+    departmentId: 'c0000000-0000-0000-0000-000000000011',
     departmentLabel: 'HQ (Root)',
   },
   {
-    id: 'compliance_t1',
-    label: 'Bob (Compliance Officer)',
-    role: 'compliance_officer',
+    id: 'security_t1',
+    label: 'Bob (Security Officer)',
+    role: 'security_officer',
     clearance: 3,
-    tenantId: '00000000-0000-0000-0000-000000000001',
+    tenantId: 'c0000000-0000-0000-0000-000000000001',
     tenantLabel: 'Acme Corp (T1)',
-    departmentId: '00000000-0000-0000-0000-000000000010',
+    departmentId: 'c0000000-0000-0000-0000-000000000011',
     departmentLabel: 'HQ (Root)',
   },
   {
@@ -49,30 +49,30 @@ export const DEV_PERSONAS: Persona[] = [
     label: 'Charlie (Engineer)',
     role: 'employee',
     clearance: 2,
-    tenantId: '00000000-0000-0000-0000-000000000001',
+    tenantId: 'c0000000-0000-0000-0000-000000000001',
     tenantLabel: 'Acme Corp (T1)',
-    departmentId: '00000000-0000-0000-0000-000000000020',
+    departmentId: 'c0000000-0000-0000-0000-000000000013',
     departmentLabel: 'Engineering',
   },
   {
-    id: 'auditor_t1',
-    label: 'Dana (Internal Auditor)',
-    role: 'auditor',
+    id: 'dept_manager_t1',
+    label: 'Dana (Dept Manager)',
+    role: 'dept_manager',
     clearance: 2,
-    tenantId: '00000000-0000-0000-0000-000000000001',
+    tenantId: 'c0000000-0000-0000-0000-000000000001',
     tenantLabel: 'Acme Corp (T1)',
-    departmentId: '00000000-0000-0000-0000-000000000010',
-    departmentLabel: 'HQ (Root)',
+    departmentId: 'c0000000-0000-0000-0000-000000000012',
+    departmentLabel: 'HR',
   },
   {
-    id: 'outsider_t2',
-    label: 'Eve (Tenant 2 Outsider)',
-    role: 'admin',
-    clearance: 4,
-    tenantId: '00000000-0000-0000-0000-000000000002',
-    tenantLabel: 'Beta Corp (T2)',
-    departmentId: '00000000-0000-0000-0000-000000000099',
-    departmentLabel: 'Beta HQ',
+    id: 'viewer_t1',
+    label: 'Eve (Viewer)',
+    role: 'viewer',
+    clearance: 1,
+    tenantId: 'c0000000-0000-0000-0000-000000000001',
+    tenantLabel: 'Acme Corp (T1)',
+    departmentId: 'c0000000-0000-0000-0000-000000000011',
+    departmentLabel: 'HQ',
   },
 ];
 
@@ -87,18 +87,7 @@ function personaToClaims(persona: Persona): UserClaims {
   };
 }
 
-// Base64Url helper
-function encodeBase64Url(input: string | Uint8Array): string {
-  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary)
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-}
+
 
 // Simple JWT parser (payload only)
 function parseJwt(token: string): UserClaims | null {
@@ -128,49 +117,21 @@ function parseJwt(token: string): UserClaims | null {
   }
 }
 
-// Real HMAC-SHA256 signature generator using Web Crypto API
-async function signJwtHS256(header: object, payload: object, secret: string): Promise<string> {
-  if (typeof window === 'undefined' || !window.crypto || !window.crypto.subtle) {
-    // Fallback for tests if crypto.subtle not available
-    const h = encodeBase64Url(JSON.stringify(header));
-    const p = encodeBase64Url(JSON.stringify(payload));
-    return `${h}.${p}.mock_signature`;
+async function createDevJwt(persona: Persona): Promise<string> {
+  const response = await fetch('/v1/dev/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(persona),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to mint dev token from backend');
   }
 
-  const enc = new TextEncoder();
-  const headerB64 = encodeBase64Url(JSON.stringify(header));
-  const payloadB64 = encodeBase64Url(JSON.stringify(payload));
-  const data = enc.encode(`${headerB64}.${payloadB64}`);
-
-  const key = await window.crypto.subtle.importKey(
-    'raw',
-    enc.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-
-  const signature = await window.crypto.subtle.sign('HMAC', key, data);
-  const signatureB64 = encodeBase64Url(new Uint8Array(signature));
-
-  return `${headerB64}.${payloadB64}.${signatureB64}`;
-}
-
-async function createDevJwt(persona: Persona, secret = 'dev-only-secret-change-me'): Promise<string> {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    sub: `dev-${persona.id}`,
-    tenant_id: persona.tenantId,
-    department_id: persona.departmentId,
-    role: persona.role,
-    clearance_rank: persona.clearance,
-    iat: now,
-    exp: now + 86400 * 7,
-    aud: 'docmgmt-api',
-  };
-
-  return signJwtHS256(header, payload, secret);
+  const data = await response.json();
+  return data.access_token;
 }
 
 interface AuthContextType {

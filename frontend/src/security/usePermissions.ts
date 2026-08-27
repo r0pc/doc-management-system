@@ -1,11 +1,11 @@
 import { useAuth } from '../api/auth';
 import { Action, ROLE_PERMISSIONS, Role } from './permissions';
-import { DocumentSummary, DocumentView } from '../api/types';
+import { DocumentListItem } from '../api/types';
 
 export function usePermissions() {
   const { user } = useAuth();
 
-  const can = (action: Action, document?: DocumentSummary | DocumentView | null): boolean => {
+  const can = (action: Action, document?: DocumentListItem | null): boolean => {
     if (!user) return false;
 
     // 1. Role action authorization
@@ -16,13 +16,14 @@ export function usePermissions() {
 
     // 2. Document clearance checks if a document is provided
     if (document) {
-      // If document is from another tenant, fail closed
-      if (document.tenant_id && document.tenant_id !== user.tenant_id) {
-        return false;
-      }
-
       // Check clearance rank vs document security level rank
-      const docRank = document.security_level_rank ?? 2; // default Internal rank 2
+      const rankMap: Record<string, number> = {
+        'public': 1,
+        'internal': 2,
+        'confidential': 3,
+        'restricted': 4,
+      };
+      const docRank = document.level ? (rankMap[document.level.toLowerCase()] ?? 2) : 2;
       if (user.clearance_rank < docRank) {
         return false;
       }

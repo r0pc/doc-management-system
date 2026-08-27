@@ -1,47 +1,41 @@
-export type SecurityLevelName = 'public' | 'internal' | 'confidential' | 'restricted';
+export type SecurityLevelName = 'Public' | 'Internal' | 'Confidential' | 'Restricted';
 
-export interface SecurityLevelOut {
-  id: string;
-  name: SecurityLevelName;
-  rank: number;
-  description?: string | null;
+export type DocumentStatus = 'quarantined' | 'processing' | 'ready' | 'failed' | 'held';
+
+export interface PresignedPut {
+  url: string;
+  expires_at: string;
 }
 
-export interface DocTypeOut {
-  id: string;
-  name: string;
-  slug: string;
-  parent_id?: string | null;
-  description?: string | null;
+export interface UploadIntentResponse {
+  upload_id: string;
+  presigned_put: PresignedPut;
 }
 
-export type DocumentStatus = 'quarantined' | 'processing' | 'ready' | 'failed';
+export interface CompleteResponse {
+  document_id: string;
+  version_id: string;
+  status: string;
+}
 
-export interface DocumentSummary {
+export interface DocumentListItem {
   id: string;
-  tenant_id: string;
-  department_id: string;
-  title: string;
-  current_version_id?: string | null;
-  created_at: string;
+  filename: string;
   status: DocumentStatus;
-  security_level_name?: SecurityLevelName | null;
-  security_level_rank?: number | null;
-  doc_type_name?: string | null;
-  mime_type?: string | null;
-  byte_size?: number | null;
+  level: string | null;
+  doc_type: string | null;
+  created_at: string;
 }
 
-export interface DocumentView extends DocumentSummary {
-  sha256?: string | null;
-  created_by?: string | null;
-  updated_at?: string | null;
+export interface DocumentPage {
+  items: DocumentListItem[];
+  next_cursor: string | null;
 }
 
 export interface FindingOut {
   entity_type: string;
   rule_id: string;
-  page_no?: number | null;
+  page_no: number | null;
   char_start: number;
   char_end: number;
   score: number;
@@ -51,64 +45,80 @@ export interface JobOut {
   stage: string;
   state: string;
   attempts: number;
-  error?: string | null;
-  started_at?: string | null;
-  finished_at?: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface ReviewQueueItem {
-  id: string;
+  review_id: string;
   document_id: string;
-  title: string;
-  suggested_level_name?: SecurityLevelName | null;
-  suggested_doc_type_name?: string | null;
-  rule_confidence?: number | null;
-  ml_confidence?: number | null;
-  reasons: string[];
+  filename: string;
+  level: string | null;
+  doc_type: string | null;
+  confidence: number | null;
+  decided_by: string | null;
+  findings_count: number | null;
   created_at: string;
-  status: 'pending' | 'resolved' | 'dismissed';
 }
 
-export interface AccessLogOut {
-  id: string;
-  created_at: string;
+export interface ReviewPage {
+  items: ReviewQueueItem[];
+  next_cursor: string | null;
+}
+
+export interface ReclassifyRequest {
+  level_name: SecurityLevelName;
+  doc_type_id: string | null;
+}
+
+export interface ResolveReviewRequest {
+  level_name: SecurityLevelName;
+  doc_type_id: string | null;
+  decision: 'accept' | 'correct';
+}
+
+export interface LabelView {
+  document_id: string;
+  level: string;
+  doc_type_id: string | null;
+  decided_by: string;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  document_id: string | null;
+  actor_id: string | null;
   action: string;
-  actor_id?: string | null;
-  document_id?: string | null;
-  ip_address?: string | null;
-  details?: Record<string, any> | null;
+  ip: string | null;
+  user_agent: string | null;
+  ts: string;
 }
 
-export interface SearchResultItem {
-  id: string;
-  title: string;
-  security_level_name: SecurityLevelName;
-  security_level_rank: number;
-  doc_type_name?: string | null;
-  snippet?: string | null;
+export interface AuditPage {
+  items: AuditLogEntry[];
+  next_cursor: string | null;
+}
+
+export interface SearchHit {
+  version_id: string;
+  document_id: string;
+  filename: string;
+  level: string | null;
+  doc_type: string | null;
+  snippet: string;
   score: number;
 }
 
+export interface Facets {
+  levels: Record<string, number>;
+  doc_types: Record<string, number>;
+}
+
 export interface SearchResponse {
-  query: string;
-  results: SearchResultItem[];
-  total: number;
-  facets: {
-    security_levels: Record<string, number>;
-    doc_types: Record<string, number>;
-  };
-}
-
-export interface UploadIntentResponse {
-  upload_id: string;
-  presigned_url: string;
-  expires_in_seconds: number;
-  quarantine_key: string;
-}
-
-export interface CursorPaginated<T> {
-  items: T[];
-  next_cursor?: string | null;
+  results: SearchHit[];
+  facets: Facets;
+  total_candidates: number;
 }
 
 export interface ProblemDetails {
@@ -118,4 +128,23 @@ export interface ProblemDetails {
   detail: string;
   instance?: string;
   [key: string]: any;
+}
+
+export interface DocTypeOut {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  description: string;
+}
+
+export interface SecurityLevelOut {
+  id: string;
+  rank: number;
+  name: string;
+  description: string;
+}
+
+export interface CursorPaginated<T> {
+  items: T[];
+  next_cursor: string | null;
 }

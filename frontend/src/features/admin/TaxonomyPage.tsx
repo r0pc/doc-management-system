@@ -15,7 +15,6 @@ export const TaxonomyPage: React.FC = () => {
   const queryClient = useQueryClient();
 
   const [newTypeName, setNewTypeName] = useState('');
-  const [newTypeSlug, setNewTypeSlug] = useState('');
   const [newTypeDesc, setNewTypeDesc] = useState('');
   const [error, setError] = useState<any>(null);
 
@@ -33,13 +32,11 @@ export const TaxonomyPage: React.FC = () => {
     mutationFn: () =>
       api.post('/v1/admin/doc-types', {
         name: newTypeName,
-        slug: newTypeSlug || newTypeName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
         description: newTypeDesc || undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['doc-types'] });
       setNewTypeName('');
-      setNewTypeSlug('');
       setNewTypeDesc('');
       setError(null);
     },
@@ -152,12 +149,6 @@ export const TaxonomyPage: React.FC = () => {
               />
               <Input
                 type="text"
-                placeholder="Slug (optional, e.g. vendor-msa)"
-                value={newTypeSlug}
-                onChange={(e) => setNewTypeSlug(e.target.value)}
-              />
-              <Input
-                type="text"
                 placeholder="Description / Category"
                 value={newTypeDesc}
                 onChange={(e) => setNewTypeDesc(e.target.value)}
@@ -185,7 +176,6 @@ export const TaxonomyPage: React.FC = () => {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Type Name</TableHead>
-                    <TableHead>Slug</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -196,9 +186,6 @@ export const TaxonomyPage: React.FC = () => {
                       <TableRow key={dt.id}>
                         <TableCell className="font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3]">
                           {dt.name}
-                        </TableCell>
-                        <TableCell className="font-mono text-[11px] text-[#656d76] dark:text-[#848d97]">
-                          {dt.slug}
                         </TableCell>
                         <TableCell className="text-xs text-[#656d76] dark:text-[#848d97]">
                           {dt.description || '—'}

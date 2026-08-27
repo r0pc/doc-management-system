@@ -8,7 +8,7 @@ body is a placeholder until the rules wave (user-locked scope, four types).
 import re
 from typing import ClassVar, Final
 
-from app.classification.rules.base import Recognizer
+from app.classification.rules.base import Recognizer, score_with_context
 from app.domain.models import Finding
 
 # Mirrors ml/entities.py constants (single source of truth for the formats).
@@ -51,9 +51,24 @@ class CardNumberRecognizer(Recognizer):
         return len(digits) == CARD_LENGTH and digits.isdigit() and luhn(digits)
 
     def scan(self, text: str) -> list[Finding]:
-        # TODO(rules-phase-2): finditer over pattern, normalise separators,
-        # validate, emit offset-only Findings scored via score_with_context.
-        return []
+        findings: list[Finding] = []
+        for match in self.pattern.finditer(text):
+            candidate = match.group()
+            if not self.validate(candidate):
+                continue
+            span = match.span()
+            score = score_with_context(text, span, self.context_words)
+            findings.append(
+                Finding(
+                    entity_type=self.entity_type,
+                    rule_id=self.__class__.__name__,
+                    page_no=None,
+                    char_start=span[0],
+                    char_end=span[1],
+                    score=score,
+                )
+            )
+        return findings
 
 
 class CnicRecognizer(Recognizer):
@@ -70,8 +85,24 @@ class CnicRecognizer(Recognizer):
         return digits[0] in CNIC_PROVINCE_DIGITS
 
     def scan(self, text: str) -> list[Finding]:
-        # TODO(rules-phase-2): finditer over pattern, validate, emit Findings.
-        return []
+        findings: list[Finding] = []
+        for match in self.pattern.finditer(text):
+            candidate = match.group()
+            if not self.validate(candidate):
+                continue
+            span = match.span()
+            score = score_with_context(text, span, self.context_words)
+            findings.append(
+                Finding(
+                    entity_type=self.entity_type,
+                    rule_id=self.__class__.__name__,
+                    page_no=None,
+                    char_start=span[0],
+                    char_end=span[1],
+                    score=score,
+                )
+            )
+        return findings
 
 
 class PassportRecognizer(Recognizer):
@@ -87,8 +118,24 @@ class PassportRecognizer(Recognizer):
         return re.fullmatch(r"[A-Z]{2}\d{7}", match_text) is not None
 
     def scan(self, text: str) -> list[Finding]:
-        # TODO(rules-phase-2): finditer over pattern, validate, emit Findings.
-        return []
+        findings: list[Finding] = []
+        for match in self.pattern.finditer(text):
+            candidate = match.group()
+            if not self.validate(candidate):
+                continue
+            span = match.span()
+            score = score_with_context(text, span, self.context_words)
+            findings.append(
+                Finding(
+                    entity_type=self.entity_type,
+                    rule_id=self.__class__.__name__,
+                    page_no=None,
+                    char_start=span[0],
+                    char_end=span[1],
+                    score=score,
+                )
+            )
+        return findings
 
 
 class BankAccountRecognizer(Recognizer):
@@ -114,5 +161,21 @@ class BankAccountRecognizer(Recognizer):
         )
 
     def scan(self, text: str) -> list[Finding]:
-        # TODO(rules-phase-2): finditer over pattern, validate, emit Findings.
-        return []
+        findings: list[Finding] = []
+        for match in self.pattern.finditer(text):
+            candidate = match.group()
+            if not self.validate(candidate):
+                continue
+            span = match.span()
+            score = score_with_context(text, span, self.context_words)
+            findings.append(
+                Finding(
+                    entity_type=self.entity_type,
+                    rule_id=self.__class__.__name__,
+                    page_no=None,
+                    char_start=span[0],
+                    char_end=span[1],
+                    score=score,
+                )
+            )
+        return findings

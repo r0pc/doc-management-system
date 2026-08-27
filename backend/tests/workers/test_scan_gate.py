@@ -34,7 +34,13 @@ def test_gate_off_in_dev_journals_skipped_and_continues(pipeline, monkeypatch, c
     seed_quarantine(pipeline.storage, key, PAYLOAD)
     calls: list[str] = []
     _wire_extraction(monkeypatch, calls)
-    monkeypatch.setattr(tasks, "_settings", lambda: Settings(env="dev", scan_enabled=False))
+    monkeypatch.setattr(
+        tasks, "_settings",
+        lambda: Settings(
+            env="dev", scan_enabled=False,
+            dev_jwt_secret="test-secret-for-tests",  # noqa: S106
+        ),
+    )
 
     tasks.process_upload_chain(str(DOC_ID), str(VER_ID), key)
 

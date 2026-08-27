@@ -26,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_409_CONFLICT
 
 from app.api import deps
-from app.api.v1.documents import _actor_uuid
 from app.db.models import Classification, DocType, SecurityLevel
 from app.domain.models import Action, UserCtx
 
@@ -167,10 +166,12 @@ async def create_doc_type(
             parent_id=payload.parent_id,
             description=payload.description,
         )
+        actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=None,
-            actor_id=_actor_uuid(user),
+            actor_id=actor_id,
             action="taxonomy.create",
             request=request,
         )
@@ -198,10 +199,12 @@ async def remove_doc_type(
         if references > 0:
             raise HTTPException(HTTP_409_CONFLICT, "document type is referenced by classifications")
         await _delete_doc_type(session, doc_type_id)
+        actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=None,
-            actor_id=_actor_uuid(user),
+            actor_id=actor_id,
             action="taxonomy.delete",
             request=request,
         )

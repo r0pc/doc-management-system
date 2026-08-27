@@ -1,47 +1,51 @@
 export enum Action {
   UPLOAD = 'upload',
+  VIEW = 'view',
   DOWNLOAD = 'download',
   PREVIEW = 'preview',
   RECLASSIFY = 'reclassify',
   RESOLVE_REVIEW = 'resolve_review',
-  SEARCH = 'search',
-  VIEW_AUDIT = 'view_audit',
   MANAGE_TAXONOMY = 'manage_taxonomy',
-  MANAGE_USERS = 'manage_users',
+  VIEW_AUDIT = 'view_audit',
 }
 
-export type Role = 'admin' | 'compliance_officer' | 'employee' | 'auditor';
+export type Role = 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Action[]> = {
   admin: [
     Action.UPLOAD,
+    Action.VIEW,
     Action.DOWNLOAD,
     Action.PREVIEW,
     Action.RECLASSIFY,
     Action.RESOLVE_REVIEW,
-    Action.SEARCH,
-    Action.VIEW_AUDIT,
     Action.MANAGE_TAXONOMY,
-    Action.MANAGE_USERS,
+    Action.VIEW_AUDIT,
   ],
-  compliance_officer: [
+  security_officer: [
     Action.UPLOAD,
+    Action.VIEW,
     Action.DOWNLOAD,
     Action.PREVIEW,
     Action.RECLASSIFY,
     Action.RESOLVE_REVIEW,
-    Action.SEARCH,
     Action.VIEW_AUDIT,
+  ],
+  dept_manager: [
+    Action.UPLOAD,
+    Action.VIEW,
+    Action.DOWNLOAD,
+    Action.PREVIEW,
+    Action.RESOLVE_REVIEW,
   ],
   employee: [
     Action.UPLOAD,
+    Action.VIEW,
     Action.DOWNLOAD,
     Action.PREVIEW,
-    Action.SEARCH,
   ],
-  auditor: [
+  viewer: [
+    Action.VIEW,
     Action.PREVIEW,
-    Action.SEARCH,
-    Action.VIEW_AUDIT,
   ],
 };

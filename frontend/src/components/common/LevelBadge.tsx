@@ -33,9 +33,9 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({
   };
 
   return (
-    <Badge variant={norm} className={className}>
-      {showIcon && (icons[norm] || <ShieldCheck className="w-3 h-3 mr-1" />)}
-      {labels[norm] || norm}
+    <Badge variant={norm as any} className={className}>
+      {showIcon && ((icons as any)[norm] || <ShieldCheck className="w-3 h-3 mr-1" />)}
+      {(labels as any)[norm] || norm}
     </Badge>
   );
 };

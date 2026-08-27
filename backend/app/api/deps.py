@@ -197,6 +197,7 @@ def _client_ip(request: Request) -> str | None:
 async def record_audit(
     session: AsyncSession,
     *,
+    tenant_id: uuid.UUID | None,
     document_id: uuid.UUID | None,
     actor_id: uuid.UUID | None,
     action: str,
@@ -209,6 +210,7 @@ async def record_audit(
     """
     await session.execute(
         insert(AccessLog).values(
+            tenant_id=tenant_id,
             document_id=document_id,
             actor_id=actor_id,
             action=action,

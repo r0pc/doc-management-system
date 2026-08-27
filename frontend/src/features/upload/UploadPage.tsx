@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { UploadIntentResponse } from '../../api/types';
 import { useAuth } from '../../api/auth';
@@ -10,12 +11,9 @@ import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { UploadCloud, CheckCircle2, FileText } from 'lucide-react';
 import { formatBytes } from '../../lib/utils';
 
-interface UploadPageProps {
-  onUploadComplete?: () => void;
-}
-
-export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
+export const UploadPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { currentPersona } = useAuth();
 
   const [file, setFile] = useState<File | null>(null);
@@ -35,6 +33,11 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0];
+      const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+      if (selected.size > MAX_FILE_SIZE) {
+        setError(new Error(`File too large. Maximum size is 100 MB, selected file is ${formatBytes(selected.size)}.`));
+        return;
+      }
       setFile(selected);
       if (!title) {
         setTitle(selected.name.replace(/\.[^/.]+$/, ''));
@@ -56,16 +59,15 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
 
       // Step 1: Request Upload Intent (Invariant #1)
       const intent = await api.post<UploadIntentResponse>('/v1/uploads', {
-        title: title || file.name,
-        department_id: departmentId || currentPersona?.departmentId,
-        mime_type: file.type || 'application/pdf',
-        byte_size: file.size,
+        filename: title || file.name,
+        size_bytes: file.size,
+        content_type: file.type || 'application/pdf',
       });
 
       // Step 2: Direct browser PUT to presigned quarantine URL (Invariant #1)
       setUploadStage('uploading');
       await api.putDirect(
-        intent.presigned_url,
+        intent.presigned_put.url,
         file,
         file.type || 'application/octet-stream',
         (percent) => setUploadProgress(percent)
@@ -74,7 +76,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
       // Step 3: Complete upload and enqueue processing chain
       setUploadStage('completing');
       await api.post(`/v1/uploads/${intent.upload_id}/complete`, {
-        actual_byte_size: file.size,
+        size_bytes: file.size,
       });
 
       setUploadStage('done');
@@ -82,7 +84,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
       queryClient.invalidateQueries({ queryKey: ['review'] });
 
       setTimeout(() => {
-        if (onUploadComplete) onUploadComplete();
+        navigate('/documents');
       }, 1200);
     } catch (err: any) {
       setUploadStage('idle');

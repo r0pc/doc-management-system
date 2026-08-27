@@ -187,17 +187,30 @@ def decode_cursor(token: str) -> tuple[datetime, uuid.UUID]:
 # --- Range parsing ---
 
 
-_RANGE_RE = re.compile(r"bytes=(\d+)-(\d+)")
+_RANGE_RE = re.compile(r"bytes=(?P<start>\d+)?-(?P<end>\d+)?")
 
 
 def parse_range(header_value: str | None, total: int) -> tuple[int, int] | None:
-    """Parse ``bytes=a-b``; unsupported forms fall back to a full 200."""
+    """Parse HTTP Range header supporting closed, open-ended, and suffix forms."""
     if not header_value:
         return None
     match = _RANGE_RE.fullmatch(header_value.strip())
     if match is None:
         return None
-    start, end = int(match.group(1)), int(match.group(2))
+    start_str = match.group("start")
+    end_str = match.group("end")
+    if not start_str and not end_str:
+        return None
+    if start_str and end_str:
+        start, end = int(start_str), int(end_str)
+    elif start_str and not end_str:
+        start, end = int(start_str), total - 1
+    else:
+        # Suffix range: bytes=-500 means last 500 bytes
+        suffix = int(end_str)
+        start = max(0, total - suffix)
+        end = total - 1
+
     if start > end or start >= total:
         raise HTTPException(
             HTTP_416_RANGE_NOT_SATISFIABLE,
@@ -379,9 +392,7 @@ async def _load_reclassify_context(
 async def _resolve_level_id(session: AsyncSession, name: LevelName) -> uuid.UUID | None:
     row = (
         await session.execute(
-            select(SecurityLevel.id).where(
-                func.lower(SecurityLevel.name) == name.value.lower()
-            )
+            select(SecurityLevel.id).where(func.lower(SecurityLevel.name) == name.value.lower())
         )
     ).first()
     return row[0] if row else None
@@ -528,10 +539,12 @@ async def get_document_content(
                 headers["Content-Range"] = f"bytes {byte_range[0]}-{byte_range[1]}/{total}"
             # Audit commits WITH the authorization decision, before streaming;
             # the generator below runs outside the session deliberately (#30).
+            actor_id = await deps.provision_actor(session, user)
             await deps.record_audit(
                 session,
+                tenant_id=user.tenant_id,
                 document_id=view.id,
-                actor_id=_actor_uuid(user),
+                actor_id=actor_id,
                 action="download.stream",
                 request=request,
             )
@@ -547,10 +560,12 @@ async def get_document_content(
             settings.presign_ttl_seconds,
             filename=view.original_filename,
         )
+        actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=view.id,
-            actor_id=_actor_uuid(user),
+            actor_id=actor_id,
             action="download.presign",
             request=request,
         )
@@ -558,13 +573,7 @@ async def get_document_content(
         return RedirectResponse(url, status_code=303)
 
 
-def _actor_uuid(user: UserCtx) -> uuid.UUID | None:
-    # Dev tokens carry uuid-shaped subs; OIDC identities map through the
-    # users table in a later wave, so a non-uuid sub audits as anonymous.
-    try:
-        return uuid.UUID(user.sub)
-    except ValueError:
-        return None
+
 
 
 @router.get("/{document_id}/findings", response_model=list[FindingOut])
@@ -579,10 +588,12 @@ async def get_document_findings(
         if _denied(view, user, Action.PREVIEW) or view is None:
             return not_found()
         findings = await _fetch_findings(session, document_id)
+        actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=view.id,
-            actor_id=_actor_uuid(user),
+            actor_id=actor_id,
             action="findings.read",
             request=request,
         )
@@ -602,10 +613,12 @@ async def get_document_jobs(
         if _denied(view, user, Action.VIEW) or view is None:
             return not_found()
         jobs = await _fetch_jobs(session, document_id)
+        actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=view.id,
-            actor_id=_actor_uuid(user),
+            actor_id=actor_id,
             action="jobs.read",
             request=request,
         )
@@ -640,10 +653,12 @@ async def reclassify_document(
             doc_type_id=payload.doc_type_id,
         )
         await _close_pending_reviews(session, context.view.id)
+        actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=context.view.id,
-            actor_id=_actor_uuid(user),
+            actor_id=actor_id,
             action="reclassify.human",
             request=request,
         )

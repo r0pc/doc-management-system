@@ -74,6 +74,20 @@ services:
       retries: 20
       start_period: 300s
 
+  migrate:
+    build: ./backend
+    init: true
+    entrypoint: ["./scripts/entrypoint-api.sh"]
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: ./backend
     init: true
@@ -82,10 +96,9 @@ services:
     entrypoint: ["./scripts/entrypoint-api.sh"]
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
-      # TODO(Dockerfile): COPY scripts/ in the image and drop this mount.
-      - ./backend/scripts:/srv/app/scripts:ro
+      - storage-data:/srv/app/var/storage
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
+      DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local # dev default; switch to minio with real buckets later
       SCAN_ENABLED: "true"
@@ -99,6 +112,8 @@ services:
         condition: service_healthy
       clamav:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build: ./backend
@@ -106,13 +121,13 @@ services:
     entrypoint: ["./scripts/entrypoint-api.sh"]
     command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "default", "-l", "info", "--pool=solo"] # pool=solo dev-only; prod uses prefork/gevent
     volumes:
-      # TODO(Dockerfile): COPY scripts/ in the image and drop this mount.
-      - ./backend/scripts:/srv/app/scripts:ro
+      - storage-data:/srv/app/var/storage
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
+      DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
       SCAN_ENABLED: "true"
+      CLAMAV_HOST: clamav
     env_file:
       - path: .env
         required: false
@@ -123,6 +138,8 @@ services:
         condition: service_healthy
       clamav:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   worker-ocr:
     build: ./backend
@@ -130,13 +147,13 @@ services:
     entrypoint: ["./scripts/entrypoint-api.sh"]
     command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "ocr", "-l", "info", "--pool=solo"] # dedicated OCR queue; never merge with default
     volumes:
-      # TODO(Dockerfile): COPY scripts/ in the image and drop this mount.
-      - ./backend/scripts:/srv/app/scripts:ro
+      - storage-data:/srv/app/var/storage
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
       SCAN_ENABLED: "true"
+      CLAMAV_HOST: clamav
     env_file:
       - path: .env
         required: false
@@ -147,8 +164,11 @@ services:
         condition: service_healthy
       clamav:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
   miniodata:
   clamavdb:
+  storage-data:

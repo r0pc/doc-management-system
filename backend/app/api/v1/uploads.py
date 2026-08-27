@@ -26,17 +26,14 @@ cap, completion re-verifies actual bytes against it (413 on mismatch) and
 against the cap regardless.
 """
 
-import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.concurrency import run_in_threadpool
 from starlette.status import (
     HTTP_409_CONFLICT,
     HTTP_413_CONTENT_TOO_LARGE,
@@ -46,13 +43,11 @@ from starlette.status import (
 from app.api import deps
 from app.api.v1.errors import not_found
 from app.config import Settings
-from app.db.models import Blob, Document, DocumentVersion
+from app.db.models import Document, DocumentVersion
 from app.domain.models import DEFAULT_FLOOR_RANK, Action, DocumentRef, UserCtx
 from app.domain.policy import can_access
-from app.extraction.registry import get_handler
-from app.extraction.sniff import sniff_mime
 from app.storage.base import Storage, clamp_presign_ttl
-from app.storage.keys import primary_key, quarantine_key
+from app.storage.keys import quarantine_key
 
 # allow: SIZE_OK - single upload resource surface (2 endpoints + ingest
 # helpers); the file whitelist for this wave forbids new modules. The
@@ -152,52 +147,19 @@ async def _load_quarantined(session: AsyncSession, upload_id: uuid.UUID) -> Quar
     return QuarantinedDoc(*row)
 
 
-def _ingest_bytes(
-    storage: Storage,
-    key: str,
-    *,
-    declared_size: int | None,
-    max_bytes: int,
-    tenant_id: uuid.UUID,
-) -> IngestResult:
-    """Single pass over quarantined bytes: verify, sniff, hash, promote (#19/#16)."""
-    with storage.open(key) as handle:
-        data: bytes = handle.read()
-    actual = len(data)
-    if actual > max_bytes or (declared_size is not None and actual != declared_size):
-        raise HTTPException(HTTP_413_CONTENT_TOO_LARGE, "payload fails size verification")
-    mime = sniff_mime(data)  # UnknownMimeError -> 422 envelope
-    get_handler(mime)  # UnsupportedMimeError -> 422 envelope
-    digest = hashlib.sha256(data).hexdigest()
-    object_key = primary_key(tenant_id, digest)
-    storage.put(object_key, BytesIO(data), content_type=mime)
-    return IngestResult(sha256=digest, size_bytes=actual, mime=mime, object_key=object_key)
-
-
-async def _persist_ingest(
+async def _persist_version(
     session: AsyncSession,
     *,
     document_id: uuid.UUID,
     actor_id: uuid.UUID,
-    result: IngestResult,
 ) -> uuid.UUID:
     """Blobs get-or-create + version 1 + status flip; caller owns the tx."""
-    existing = await session.execute(select(Blob.sha256).where(Blob.sha256 == result.sha256))
-    if existing.scalar_one_or_none() is None:
-        await session.execute(
-            insert(Blob).values(
-                sha256=result.sha256,
-                size_bytes=result.size_bytes,
-                mime_sniffed=result.mime,
-                bucket_key=result.object_key,
-            )
-        )
     version_id = uuid.uuid4()
     await session.execute(
         insert(DocumentVersion).values(
             id=version_id,
             document_id=document_id,
-            blob_sha256=result.sha256,
+            blob_sha256=None,
             version_no=1,
             created_by=actor_id,
         )
@@ -251,6 +213,7 @@ async def create_upload_intent(
             url = storage.presign(key, ttl, filename=payload.filename)
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=document_id,
             actor_id=actor_id,
             action="upload.init",
@@ -275,7 +238,6 @@ async def complete_upload(
     storage: Storage = Depends(deps.get_storage),
     payload: CompleteRequest | None = None,
 ) -> CompleteResponse | Response:
-    declared = payload.size_bytes if payload is not None else None
     async with sessions(user.tenant_id) as session:
         # Authorize-BEFORE-fetch discipline (#31): RLS makes foreign rows read
         # as missing, then policy re-checks the axes server-side (#33); every
@@ -296,20 +258,12 @@ async def complete_upload(
             raise HTTPException(HTTP_409_CONFLICT, "document is not quarantined")
 
         actor_id = await _provision_actor(session, user)
-        quarantine = quarantine_key(user.tenant_id, upload_id)
-        result = await run_in_threadpool(
-            _ingest_bytes,
-            storage,
-            quarantine,
-            declared_size=declared,
-            max_bytes=settings.upload_max_bytes,
-            tenant_id=user.tenant_id,
-        )
-        version_id = await _persist_ingest(
-            session, document_id=doc.id, actor_id=actor_id, result=result
+        version_id = await _persist_version(
+            session, document_id=doc.id, actor_id=actor_id
         )
         await deps.record_audit(
             session,
+            tenant_id=user.tenant_id,
             document_id=doc.id,
             actor_id=actor_id,
             action="upload.complete",

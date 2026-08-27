@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { AccessLogOut, CursorPaginated } from '../../api/types';
+import { AuditLogEntry, CursorPaginated } from '../../api/types';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/table';
 import { Button } from '../../components/ui/button';
 import { TableSkeleton } from '../../components/common/LoadingSkeleton';
@@ -10,8 +10,22 @@ import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { formatDate } from '../../lib/utils';
 import { History, RefreshCw, User, FileText } from 'lucide-react';
 
+import { useSearchParams } from 'react-router-dom';
+
 export const AuditPage: React.FC = () => {
-  const [actionFilter, setActionFilter] = useState<string>('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const actionFilter = searchParams.get('action') || '';
+  
+  const [cursors, setCursors] = useState<string[]>([]);
+  const currentCursor = cursors[cursors.length - 1] ?? undefined;
+
+  const setActionFilter = (val: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (val) newParams.set('action', val);
+    else newParams.delete('action');
+    setSearchParams(newParams);
+    setCursors([]);
+  };
 
   const {
     data: auditData,
@@ -20,17 +34,19 @@ export const AuditPage: React.FC = () => {
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ['audit', actionFilter],
+    queryKey: ['audit', actionFilter, currentCursor],
     queryFn: () =>
-      api.get<CursorPaginated<AccessLogOut> | AccessLogOut[]>('/v1/audit', {
+      api.get<CursorPaginated<AuditLogEntry> | AuditLogEntry[]>('/v1/audit', {
         action: actionFilter || undefined,
         limit: 50,
+        cursor: currentCursor,
       }),
   });
 
-  const logs: AccessLogOut[] = Array.isArray(auditData)
+  const logs: AuditLogEntry[] = Array.isArray(auditData)
     ? auditData
     : auditData?.items || [];
+  const nextCursor = !Array.isArray(auditData) ? auditData?.next_cursor : null;
 
   return (
     <div className="space-y-4">
@@ -129,7 +145,7 @@ export const AuditPage: React.FC = () => {
               {logs.map((log) => (
                 <TableRow key={log.id} className="hover:bg-[#f6f8fa] dark:hover:bg-[#161b22] font-mono text-xs">
                   <TableCell className="text-[#656d76] dark:text-[#848d97] font-sans text-xs">
-                    {formatDate(log.created_at)}
+                    {formatDate(log.ts)}
                   </TableCell>
                   <TableCell>
                     <span
@@ -163,13 +179,10 @@ export const AuditPage: React.FC = () => {
                     )}
                   </TableCell>
                   <TableCell className="text-[#656d76] dark:text-[#848d97] text-[11px] font-mono">
-                    {log.details ? (
-                      <span className="truncate block max-w-xs" title={JSON.stringify(log.details)}>
-                        {JSON.stringify(log.details)}
-                      </span>
-                    ) : (
-                      '—'
-                    )}
+                    <div className="flex flex-col">
+                      <span className="truncate max-w-xs">{log.ip || 'No IP'}</span>
+                      <span className="truncate max-w-xs text-[#8c959f]">{log.user_agent || 'Unknown agent'}</span>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -177,6 +190,26 @@ export const AuditPage: React.FC = () => {
           </Table>
         </div>
       )}
+
+      {/* Pagination Controls */}
+      <div className="flex justify-between items-center pt-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setCursors((prev) => prev.slice(0, -1))}
+          disabled={cursors.length === 0 || isFetching}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setCursors((prev) => [...prev, nextCursor!])}
+          disabled={!nextCursor || isFetching}
+        >
+          Next
+        </Button>
+      </div>
     </div>
   );
 };
