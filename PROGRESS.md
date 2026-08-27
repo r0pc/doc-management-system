@@ -27,20 +27,20 @@ Backend-first build of the self-hosted DMS per `AGENTS.md` + `Docs/document-mana
 | 4 | Review queue/resolution (human lower audited same-tx), read-only audit endpoints #24, taxonomy admin CRUD, `/v1/events` 501 stub · Hybrid search: visibility predicate composed INSIDE both arms pre-rank #27, RRF fusion scaffold (vector arm zero-rows until embeddings), facets/snippets from filtered set only #28 | ✅ Complete |
 | 5A | End-to-End System Verification (`backend/tests/integration/test_e2e_upload_to_review.py` & `scripts/e2e.sh`): walks S0 (DB migration) → S1 (dev JWT minting) → S2 (presigned PUT + upload complete) → S3 (worker pipeline execution + review queue) → S4 (human review resolution + lowering under `check_monotonic` trigger + audit trail) → S5 (split content streaming with Range vs 303 redirect) → S6 (cross-tenant RFC 7807 404 byte-parity) → S7 (EICAR malware rejection against live ClamAV) | ✅ Complete |
 | 5B | Documentation & Final QA: Root/backend/ml README sweep with complete 33 Invariant Enforcement Matrix, Deviations & Architectural Decisions Ledger, full gate execution (466 hermetic, 6 integration, 21 ML), reviewer gate pass | ✅ Complete |
+| 6 | Frontend Application (React 18 + TypeScript + Vite + Tailwind/shadcn + TanStack Query & Table): multi-tenant auth / dev persona switcher, direct presigned PUT upload wizard (Invariant #1), keyset-paginated document library with split range streaming content (Invariant #17 & #18), human review queue with confidence bars and char-offset findings (Invariant #8 & #12), hybrid search with pre-filtered facets (Invariants #27, #28, #29), immutable audit trail (Invariant #24 & #30), taxonomy admin CRUD, cosmetic UI gating (<Can> / usePermissions, Invariant #33) | ✅ Complete |
 
 ### Gate status at handoff (all self-run, verbatim tails)
 
 ```
-pytest -q                  → 466 passed, 3 skipped, 7 deselected   (unit; hermetic, no infra)
-pytest -m integration      → 6 passed                             (all integration tests passing:
-                                                                   e2e upload-to-review lifecycle,
-                                                                   live ClamAV EICAR rejection,
-                                                                   migration roundtrip, monotonic
-                                                                   trigger, RLS isolation, grants)
-mypy app                   → Success: no issues found in 61 source files (strict)
-ruff check .               → All checks passed!
-ml tests                   → 21 passed
-docker compose ps          → postgres (55432), redis (6379), clamav (3310), minio (9000/9001) all healthy
+Frontend typecheck         → tsc --noEmit: clean (strict mode)
+Frontend tests             → vitest run: 10 passed across 3 test suites
+Frontend build             → vite build: dist/ generated in 3.74s (280 kB JS, 27 kB CSS)
+Backend hermetic tests     → pytest -q: 466 passed, 3 skipped, 7 deselected
+Backend integration tests  → pytest -m integration -v: 6 passed (real PG16 @55432 & ClamAV @3310)
+Backend typecheck          → mypy app: Success: no issues found in 61 source files (strict)
+Backend linting            → ruff check .: All checks passed!
+ML tests                   → pytest tests -q: 21 passed
+Docker compose stack       → postgres (55432), redis (6379), clamav (3310), minio (9000/9001) all healthy
 ```
 
 ## 3. Wave 5A Verification Matrix
