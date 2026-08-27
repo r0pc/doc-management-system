@@ -63,43 +63,43 @@ export const ResolveReviewDialog: React.FC<ResolveReviewDialogProps> = ({
     <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
-          <CheckSquare className="w-5 h-5 text-emerald-600" />
+          <CheckSquare className="w-4 h-4 text-[#1a7f37] dark:text-[#3fb950]" />
           Resolve Review Item
         </DialogTitle>
         <DialogDescription>
-          Confirm or override the suggested classification for: <strong className="text-slate-900">{item?.title}</strong>
+          Confirm or override the classification for: <strong className="text-[#1f2328] dark:text-[#e6edf3]">{item?.title}</strong>
         </DialogDescription>
       </DialogHeader>
 
-      <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+      <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4 text-xs">
         <ProblemAlert error={error} />
 
-        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase">
+        <div className="p-2.5 bg-[#f6f8fa] dark:bg-[#21262d] border border-[#d0d7de] dark:border-[#30363d] rounded-md space-y-1.5">
+          <div className="text-[10px] font-semibold text-[#656d76] dark:text-[#848d97] uppercase">
             Cascade Trigger Reasons
           </div>
           <div className="space-y-1">
             {item?.reasons && item.reasons.length > 0 ? (
               item.reasons.map((r, i) => (
-                <div key={i} className="flex items-start gap-1.5 text-slate-700 font-mono text-[11px]">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                <div key={i} className="flex items-start gap-1.5 text-[#1f2328] dark:text-[#e6edf3] font-mono text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 text-[#9a6700] dark:text-[#d29922] shrink-0 mt-0.5" />
                   <span>{r}</span>
                 </div>
               ))
             ) : (
-              <span className="text-slate-400">Standard review route.</span>
+              <span className="text-[#656d76] dark:text-[#848d97]">Standard review route.</span>
             )}
           </div>
         </div>
 
         <div>
-          <label className="block font-semibold text-slate-700 mb-1">
+          <label className="block font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
             Final Security Level (Human Decision)
           </label>
           <select
             value={securityLevel}
             onChange={(e) => setSecurityLevel(e.target.value as SecurityLevelName)}
-            className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-600"
+            className="w-full h-8 rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
           >
             <option value="public">Public (Rank 1)</option>
             <option value="internal">Internal (Rank 2 - Default Floor)</option>
@@ -109,7 +109,7 @@ export const ResolveReviewDialog: React.FC<ResolveReviewDialogProps> = ({
         </div>
 
         <div>
-          <label className="block font-semibold text-slate-700 mb-1">
+          <label className="block font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
             Final Document Type
           </label>
           <input
@@ -117,12 +117,12 @@ export const ResolveReviewDialog: React.FC<ResolveReviewDialogProps> = ({
             value={docTypeName}
             onChange={(e) => setDocTypeName(e.target.value)}
             placeholder="e.g. Contract › Vendor MSA"
-            className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-600"
+            className="w-full h-8 rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] px-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
           />
         </div>
 
         <div>
-          <label className="block font-semibold text-slate-700 mb-1">
+          <label className="block font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
             Resolution Notes (Audited)
           </label>
           <textarea
@@ -131,19 +131,19 @@ export const ResolveReviewDialog: React.FC<ResolveReviewDialogProps> = ({
             onChange={(e) => setResolutionNotes(e.target.value)}
             placeholder="Document rationale for this resolution..."
             required
-            className="w-full rounded-md border border-slate-300 bg-white p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-600"
+            className="w-full rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] p-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
           />
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="p-0 border-0 pt-2">
           <Button type="button" variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
           <Button
             type="submit"
             size="sm"
+            variant="default"
             disabled={resolveMutation.isPending}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             {resolveMutation.isPending ? 'Resolving...' : 'Confirm Resolution'}
           </Button>

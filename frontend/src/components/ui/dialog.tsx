@@ -12,18 +12,18 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(1,4,9,0.75)] backdrop-blur-2xs animate-in fade-in duration-100">
       <div
         className="fixed inset-0"
         onClick={() => onOpenChange(false)}
         aria-hidden="true"
       />
-      <div className="relative z-50 w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
+      <div className="relative z-50 w-full max-w-lg rounded-md bg-white dark:bg-[#161b22] text-[#1f2328] dark:text-[#e6edf3] shadow-2xl border border-[#d0d7de] dark:border-[#30363d] overflow-hidden animate-in zoom-in-95 duration-100">
         <button
           onClick={() => onOpenChange(false)}
-          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          className="absolute right-3.5 top-3.5 rounded-sm p-1 text-[#656d76] dark:text-[#848d97] hover:text-[#1f2328] dark:hover:text-[#e6edf3] hover:bg-[#eaeef2] dark:hover:bg-[#30363d] transition-colors"
         >
-          <X className="h-4 w-4 text-slate-500 hover:text-slate-900" />
+          <X className="h-4 w-4" />
           <span className="sr-only">Close</span>
         </button>
         {children}
@@ -39,7 +39,7 @@ export function DialogHeader({
   return (
     <div
       className={cn(
-        'flex flex-col space-y-1.5 text-center sm:text-left mb-4',
+        'flex flex-col space-y-1 p-4 sm:p-5 border-b border-[#d0d7de] dark:border-[#30363d] bg-[#f6f8fa] dark:bg-[#161b22]',
         className
       )}
       {...props}
@@ -54,7 +54,7 @@ export function DialogTitle({
   return (
     <h2
       className={cn(
-        'text-lg font-semibold leading-none tracking-tight text-slate-900',
+        'text-sm font-semibold leading-none tracking-tight text-[#1f2328] dark:text-[#e6edf3]',
         className
       )}
       {...props}
@@ -68,7 +68,7 @@ export function DialogDescription({
 }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
     <p
-      className={cn('text-sm text-slate-500 mt-1', className)}
+      className={cn('text-xs text-[#656d76] dark:text-[#848d97] mt-1', className)}
       {...props}
     />
   );
@@ -81,7 +81,7 @@ export function DialogFooter({
   return (
     <div
       className={cn(
-        'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 mt-6 pt-4 border-t border-slate-100',
+        'flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-4 sm:p-5 border-t border-[#d0d7de] dark:border-[#30363d] bg-[#f6f8fa] dark:bg-[#161b22]',
         className
       )}
       {...props}

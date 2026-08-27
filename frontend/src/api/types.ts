@@ -39,21 +39,21 @@ export interface DocumentView extends DocumentSummary {
 }
 
 export interface FindingOut {
-  id: string;
   entity_type: string;
+  rule_id: string;
+  page_no?: number | null;
   char_start: number;
   char_end: number;
-  page_no: number;
   score: number;
 }
 
 export interface JobOut {
-  id: string;
   stage: string;
-  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  state: string;
+  attempts: number;
+  error?: string | null;
   started_at?: string | null;
-  completed_at?: string | null;
-  error_message?: string | null;
+  finished_at?: string | null;
 }
 
 export interface ReviewQueueItem {
@@ -99,23 +99,23 @@ export interface SearchResponse {
   };
 }
 
-export interface ProblemDetails {
-  type: string;
-  title: string;
-  status: number;
-  detail?: string;
-  instance?: string;
-}
-
 export interface UploadIntentResponse {
   upload_id: string;
-  document_id: string;
   presigned_url: string;
   expires_in_seconds: number;
+  quarantine_key: string;
 }
 
 export interface CursorPaginated<T> {
   items: T[];
   next_cursor?: string | null;
-  has_more: boolean;
+}
+
+export interface ProblemDetails {
+  type: string;
+  title: string;
+  status: number;
+  detail: string;
+  instance?: string;
+  [key: string]: any;
 }

@@ -3,24 +3,24 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../lib/utils';
 
 const badgeVariants = cva(
-  'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+  'inline-flex items-center rounded-full border px-2 py-0.2 text-[11px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-primary text-primary-foreground',
-        secondary: 'border-transparent bg-secondary text-secondary-foreground',
-        destructive: 'border-transparent bg-destructive text-destructive-foreground',
-        outline: 'text-foreground',
-        // Security levels
-        public: 'border-emerald-200 bg-emerald-50 text-emerald-700 font-medium',
-        internal: 'border-blue-200 bg-blue-50 text-blue-700 font-medium',
-        confidential: 'border-amber-300 bg-amber-50 text-amber-800 font-semibold',
-        restricted: 'border-rose-300 bg-rose-50 text-rose-800 font-bold tracking-wide',
+        default: 'border-transparent bg-[#0969da] text-white dark:bg-[#1f6feb]',
+        secondary: 'border-[#d0d7de] dark:border-[#30363d] bg-[#f6f8fa] dark:bg-[#21262d] text-[#1f2328] dark:text-[#e6edf3]',
+        destructive: 'border-[#ff8182]/40 bg-[#ffebe9] dark:bg-[#da3633]/25 text-[#cf222e] dark:text-[#f85149]',
+        outline: 'border-[#d0d7de] dark:border-[#30363d] text-[#1f2328] dark:text-[#e6edf3]',
+        // GitHub-styled Security levels
+        public: 'border-[#4ac26b]/40 bg-[#dafbe1] dark:bg-[#238636]/25 text-[#1a7f37] dark:text-[#3fb950] font-semibold',
+        internal: 'border-[#54aeff]/40 bg-[#ddf4ff] dark:bg-[#388bfd]/20 text-[#0969da] dark:text-[#58a6ff] font-semibold',
+        confidential: 'border-[#d4a72c]/40 bg-[#fff8c5] dark:bg-[#9e6a03]/30 text-[#9a6700] dark:text-[#d29922] font-semibold',
+        restricted: 'border-[#ff8182]/40 bg-[#ffebe9] dark:bg-[#da3633]/30 text-[#cf222e] dark:text-[#f85149] font-bold tracking-wide',
         // Status
-        ready: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-        processing: 'border-sky-200 bg-sky-50 text-sky-700 animate-pulse',
-        quarantined: 'border-amber-200 bg-amber-50 text-amber-700',
-        failed: 'border-rose-200 bg-rose-50 text-rose-700',
+        ready: 'border-[#4ac26b]/40 bg-[#dafbe1] dark:bg-[#238636]/25 text-[#1a7f37] dark:text-[#3fb950]',
+        processing: 'border-[#54aeff]/40 bg-[#ddf4ff] dark:bg-[#388bfd]/20 text-[#0969da] dark:text-[#58a6ff] animate-pulse',
+        quarantined: 'border-[#d4a72c]/40 bg-[#fff8c5] dark:bg-[#9e6a03]/30 text-[#9a6700] dark:text-[#d29922]',
+        failed: 'border-[#ff8182]/40 bg-[#ffebe9] dark:bg-[#da3633]/25 text-[#cf222e] dark:text-[#f85149]',
       },
     },
     defaultVariants: {

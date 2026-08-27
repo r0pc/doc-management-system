@@ -16,7 +16,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   children,
 }) => {
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
+    <div className="min-h-screen flex flex-col bg-[#ffffff] dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] transition-colors font-sans">
       <Navbar />
       <div className="flex flex-1">
         <Sidebar
@@ -24,7 +24,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onSelectTab={onSelectTab}
           reviewCount={reviewCount}
         />
-        <main className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+        <main className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto bg-white dark:bg-[#0d1117]">
           {children}
         </main>
       </div>

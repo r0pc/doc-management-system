@@ -4,65 +4,67 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222.2 84% 4.9%;
+    /* GitHub Light Default Palette */
+    --background: 210 17% 98%;      /* #f6f8fa (canvas.subtle) */
+    --foreground: 212 13% 11%;      /* #1f2328 (fg.default) */
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;             /* #ffffff (canvas.default) */
+    --card-foreground: 212 13% 11%; /* #1f2328 (fg.default) */
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;          /* #ffffff */
+    --popover-foreground: 212 13% 11%;
 
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 212 92% 45%;         /* #0969da (accent.fg) */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 210 14% 93%;       /* #eaeef2 */
+    --secondary-foreground: 212 13% 11%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 210 17% 95%;          /* #f3f4f6 */
+    --muted-foreground: 213 8% 43%; /* #656d76 (fg.muted) */
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 212 92% 95%;         /* #ddf4ff */
+    --accent-foreground: 212 92% 45%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 356 71% 47%;     /* #cf222e (danger.fg) */
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --border: 210 14% 84%;         /* #d0d7de (border.default) */
+    --input: 210 14% 84%;
+    --ring: 212 92% 45%;
 
-    --radius: 0.5rem;
+    --radius: 6px;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    /* GitHub Dark Default Palette */
+    --background: 216 28% 7%;       /* #0d1117 (canvas.default) */
+    --foreground: 208 40% 93%;      /* #e6edf3 (fg.default) */
 
-    --card: 222.2 84% 6%;
-    --card-foreground: 210 40% 98%;
+    --card: 215 21% 11%;           /* #161b22 (canvas.subtle) */
+    --card-foreground: 208 40% 93%; /* #e6edf3 (fg.default) */
 
-    --popover: 222.2 84% 6%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 215 14% 15%;        /* #21262d (canvas.overlay) */
+    --popover-foreground: 208 40% 93%;
 
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 216 93% 58%;        /* #2f81f7 (accent.fg) */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 215 14% 15%;      /* #21262d */
+    --secondary-foreground: 208 40% 93%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 215 21% 11%;          /* #161b22 */
+    --muted-foreground: 213 9% 56%;/* #848d97 (fg.muted) */
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 215 14% 15%;         /* #21262d */
+    --accent-foreground: 208 40% 93%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 3 90% 63%;      /* #f85149 (danger.fg) */
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    --border: 215 12% 21%;         /* #30363d (border.default) */
+    --input: 215 12% 21%;
+    --ring: 216 93% 58%;
   }
 }
 
@@ -71,6 +73,7 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground antialiased transition-colors duration-150;
+    @apply bg-background text-foreground antialiased selection:bg-blue-500/20 selection:text-blue-500 transition-colors duration-150;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   }
 }

@@ -37,7 +37,6 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
       const selected = e.target.files[0];
       setFile(selected);
       if (!title) {
-        // Strip extension as default title
         setTitle(selected.name.replace(/\.[^/.]+$/, ''));
       }
       setError(null);
@@ -92,25 +91,25 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-slate-900">Upload Document</h2>
-        <p className="text-xs text-slate-500 mt-0.5">
+    <div className="max-w-2xl mx-auto space-y-4">
+      <div className="pb-3 border-b border-[#d0d7de] dark:border-[#30363d]">
+        <h2 className="text-lg font-bold text-[#1f2328] dark:text-[#e6edf3] tracking-tight">Upload Document</h2>
+        <p className="text-xs text-[#656d76] dark:text-[#848d97] mt-0.5">
           Documents are quarantined, scanned for malware with ClamAV, and classified asynchronously.
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Ingestion Intent & Quarantine PUT</CardTitle>
+          <CardTitle>Ingestion Intent & Direct Quarantine PUT</CardTitle>
           <CardDescription>
-            Direct presigned upload (Invariant #1): API never touches raw bytes on the write path.
+            Zero-broker upload (Invariant #1): API never touches raw bytes on the write path.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleUpload} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
                 Document Title
               </label>
               <Input
@@ -123,7 +122,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
                 Target Department UUID
               </label>
               <Input
@@ -133,20 +132,20 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
                 placeholder="00000000-0000-0000-0000-000000000010"
                 required
               />
-              <p className="text-[11px] text-slate-400 mt-1">
+              <p className="text-[11px] text-[#656d76] dark:text-[#848d97] mt-1">
                 Current Persona Department: {currentPersona?.departmentLabel}
               </p>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
                 Document File (.pdf, .docx, .xlsx)
               </label>
-              <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-300 border-dashed rounded-lg hover:border-blue-400 transition-colors bg-slate-50/50">
+              <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-[#d0d7de] dark:border-[#30363d] border-dashed rounded-md hover:border-[#0969da] dark:hover:border-[#2f81f7] transition-colors bg-[#f6f8fa] dark:bg-[#161b22]">
                 <div className="space-y-2 text-center">
-                  <UploadCloud className="mx-auto h-8 w-8 text-slate-400" />
-                  <div className="flex text-xs text-slate-600 justify-center">
-                    <label className="relative cursor-pointer bg-white rounded-md font-semibold text-blue-600 hover:text-blue-500 focus-within:outline-none px-2 py-0.5 border border-slate-200">
+                  <UploadCloud className="mx-auto h-7 w-7 text-[#656d76] dark:text-[#848d97]" />
+                  <div className="flex text-xs text-[#656d76] dark:text-[#848d97] justify-center">
+                    <label className="relative cursor-pointer bg-white dark:bg-[#21262d] rounded font-semibold text-[#0969da] dark:text-[#2f81f7] hover:underline focus-within:outline-none px-2 py-0.5 border border-[#d0d7de] dark:border-[#30363d] shadow-2xs">
                       <span>Choose file</span>
                       <input
                         type="file"
@@ -157,7 +156,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
                     </label>
                     <p className="pl-1.5 py-0.5">or drag and drop</p>
                   </div>
-                  <p className="text-[10px] text-slate-400">
+                  <p className="text-[10px] text-[#656d76] dark:text-[#848d97]">
                     PDF, DOCX, or XLSX up to 100 MiB (MIME sniffed on ingestion)
                   </p>
                 </div>
@@ -165,32 +164,32 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
             </div>
 
             {file && (
-              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 text-blue-950 font-medium truncate">
-                  <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+              <div className="p-2.5 bg-[#ddf4ff]/60 dark:bg-[#388bfd]/15 border border-[#54aeff]/40 rounded-md flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-[#0969da] dark:text-[#58a6ff] font-medium truncate">
+                  <FileText className="w-4 h-4 shrink-0" />
                   <span className="truncate">{file.name}</span>
                 </div>
-                <span className="text-blue-700 font-mono shrink-0 ml-2">
+                <span className="text-[#0969da] dark:text-[#58a6ff] font-mono text-[11px] shrink-0 ml-2">
                   {formatBytes(file.size)}
                 </span>
               </div>
             )}
 
             {uploadStage !== 'idle' && (
-              <div className="space-y-2 pt-2">
-                <div className="flex justify-between text-xs text-slate-600">
+              <div className="space-y-1.5 pt-2">
+                <div className="flex justify-between text-xs text-[#656d76] dark:text-[#848d97]">
                   <span className="font-medium">
                     {uploadStage === 'intent' && 'Requesting upload intent...'}
-                    {uploadStage === 'uploading' && `Uploading directly to quarantine storage (${uploadProgress}%)...`}
+                    {uploadStage === 'uploading' && `Uploading directly to quarantine (${uploadProgress}%)...`}
                     {uploadStage === 'completing' && 'Finalizing upload & queueing pipeline...'}
                     {uploadStage === 'done' && 'Upload complete! Ingesting...'}
                   </span>
                   <span className="font-mono">{uploadProgress}%</span>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                <div className="w-full bg-[#eaeef2] dark:bg-[#21262d] rounded-full h-1.5 overflow-hidden">
                   <div
-                    className={`h-2 rounded-full transition-all duration-200 ${
-                      uploadStage === 'done' ? 'bg-emerald-500' : 'bg-blue-600'
+                    className={`h-1.5 rounded-full transition-all duration-200 ${
+                      uploadStage === 'done' ? 'bg-[#1a7f37] dark:bg-[#3fb950]' : 'bg-[#0969da] dark:bg-[#2f81f7]'
                     }`}
                     style={{
                       width: `${uploadStage === 'done' ? 100 : uploadProgress}%`,
@@ -205,8 +204,9 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
             <div className="pt-2">
               <Button
                 type="submit"
+                variant="default"
                 disabled={!file || uploadStage !== 'idle'}
-                className="w-full"
+                className="w-full h-8"
               >
                 {uploadStage === 'idle' && 'Start Upload'}
                 {uploadStage === 'intent' && 'Preparing Intent...'}
@@ -214,7 +214,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadComplete }) => {
                 {uploadStage === 'completing' && 'Finalizing...'}
                 {uploadStage === 'done' && (
                   <span className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-white" /> Success! Redirecting...
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" /> Success! Redirecting...
                   </span>
                 )}
               </Button>

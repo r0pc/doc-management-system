@@ -62,192 +62,174 @@ export const TaxonomyPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8 max-w-5xl">
+    <div className="space-y-6 max-w-5xl">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-          Taxonomy & Security Governance
+      <div className="pb-3 border-b border-[#d0d7de] dark:border-[#30363d]">
+        <h2 className="text-lg font-bold text-[#1f2328] dark:text-[#e6edf3] tracking-tight">
+          Taxonomy Administration
         </h2>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Manage monotonic security levels and hierarchical document categories.
+        <p className="text-xs text-[#656d76] dark:text-[#848d97] mt-0.5">
+          Manage system-wide Security Levels hierarchy (Invariant #23: rank ≠ PK) and hierarchical Document Types.
         </p>
       </div>
 
       <ProblemAlert error={error} />
 
-      {/* Security Levels Reference */}
+      {/* 1. Security Levels Table */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-blue-600" />
+            <Shield className="w-4 h-4 text-[#0969da] dark:text-[#2f81f7]" />
             Security Level Hierarchy
           </CardTitle>
           <CardDescription>
-            Monotonic upward aggregation (Invariant #8 & #23). Absence of evidence defaults to Internal (Rank 2).
+            Strict ordinal rank: `Public` (1) → `Internal` (2) → `Confidential` (3) → `Restricted` (4). Monotonic upward.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {levelsLoading ? (
-            <TableSkeleton rows={4} cols={3} />
+            <TableSkeleton rows={4} cols={4} />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-20">Rank</TableHead>
-                  <TableHead>Level Name</TableHead>
-                  <TableHead>Description / Access Boundary</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {levels?.map((lvl) => (
-                  <TableRow key={lvl.id}>
-                    <TableCell className="font-mono font-bold text-slate-900">
-                      Rank {lvl.rank}
-                    </TableCell>
-                    <TableCell>
-                      <LevelBadge level={lvl.name} rank={lvl.rank} />
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-600">
-                      {lvl.description ||
-                        (lvl.rank === 1
-                          ? 'Public distribution permitted; minimal restrictions.'
-                          : lvl.rank === 2
-                          ? 'Default floor; company-internal circulation only.'
-                          : lvl.rank === 3
-                          ? 'Sensitive business, financial, or personal data; stream delivery.'
-                          : 'Strictly restricted; critical PII or board materials; audited stream delivery.')}
-                    </TableCell>
+            <div className="bg-white dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">Rank</TableHead>
+                    <TableHead>Level Label</TableHead>
+                    <TableHead>System Identifier / Slug</TableHead>
+                    <TableHead>Description</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {levels &&
+                    levels.map((lvl) => (
+                      <TableRow key={lvl.id}>
+                        <TableCell className="font-mono font-bold text-xs text-[#1f2328] dark:text-[#e6edf3]">
+                          {lvl.rank}
+                        </TableCell>
+                        <TableCell>
+                          <LevelBadge level={lvl.name} rank={lvl.rank} />
+                        </TableCell>
+                        <TableCell className="font-mono text-[11px] text-[#656d76] dark:text-[#848d97]">
+                          {lvl.name}
+                        </TableCell>
+                        <TableCell className="text-xs text-[#656d76] dark:text-[#848d97]">
+                          {lvl.description || '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Document Types Manager */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FolderTree className="w-5 h-5 text-blue-600" />
-                Hierarchical Document Types
-              </CardTitle>
-              <CardDescription>
-                Classification types combined via confident first-match cascade.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {docTypesLoading ? (
-                <TableSkeleton rows={5} cols={3} />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type Name</TableHead>
-                      <TableHead>Slug</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {docTypes?.map((dt) => (
+      {/* 2. Document Types CRUD */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FolderTree className="w-4 h-4 text-[#1a7f37] dark:text-[#3fb950]" />
+            Document Types (Cascade Hierarchy)
+          </CardTitle>
+          <CardDescription>
+            Categorical taxonomy used by rules and calibrated ML classifier for document cascade matching.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Create Form */}
+          <form onSubmit={handleCreateType} className="p-3.5 bg-[#f6f8fa] dark:bg-[#161b22] border border-[#d0d7de] dark:border-[#30363d] rounded-md space-y-3">
+            <div className="font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3]">
+              Add New Document Type
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Input
+                type="text"
+                placeholder="Type Name (e.g. Vendor MSA)"
+                value={newTypeName}
+                onChange={(e) => setNewTypeName(e.target.value)}
+                required
+              />
+              <Input
+                type="text"
+                placeholder="Slug (optional, e.g. vendor-msa)"
+                value={newTypeSlug}
+                onChange={(e) => setNewTypeSlug(e.target.value)}
+              />
+              <Input
+                type="text"
+                placeholder="Description / Category"
+                value={newTypeDesc}
+                onChange={(e) => setNewTypeDesc(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button
+                type="submit"
+                variant="default"
+                size="sm"
+                disabled={createDocTypeMutation.isPending || !newTypeName.trim()}
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                {createDocTypeMutation.isPending ? 'Adding...' : 'Add Type'}
+              </Button>
+            </div>
+          </form>
+
+          {/* Types List Table */}
+          {docTypesLoading ? (
+            <TableSkeleton rows={4} cols={4} />
+          ) : (
+            <div className="bg-white dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Type Name</TableHead>
+                    <TableHead>Slug</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {docTypes && docTypes.length > 0 ? (
+                    docTypes.map((dt) => (
                       <TableRow key={dt.id}>
-                        <TableCell className="font-semibold text-slate-900 text-xs">
+                        <TableCell className="font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3]">
                           {dt.name}
                         </TableCell>
-                        <TableCell className="font-mono text-slate-500 text-xs">
+                        <TableCell className="font-mono text-[11px] text-[#656d76] dark:text-[#848d97]">
                           {dt.slug}
+                        </TableCell>
+                        <TableCell className="text-xs text-[#656d76] dark:text-[#848d97]">
+                          {dt.description || '—'}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
-                            variant="ghost"
+                            variant="destructive"
                             size="sm"
                             onClick={() => deleteDocTypeMutation.mutate(dt.id)}
-                            className="h-8 px-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                            disabled={deleteDocTypeMutation.isPending}
+                            className="h-6 px-2 text-[10px]"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            Delete
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Add Document Type */}
-        <div>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Create Document Type</CardTitle>
-              <CardDescription className="text-xs">
-                Add a new classification category.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleCreateType} className="space-y-3 text-xs">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Type Name
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="e.g. Invoices"
-                    value={newTypeName}
-                    onChange={(e) => {
-                      setNewTypeName(e.target.value);
-                      if (!newTypeSlug) {
-                        setNewTypeSlug(
-                          e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-                        );
-                      }
-                    }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Slug
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="e.g. invoice"
-                    value={newTypeSlug}
-                    onChange={(e) => setNewTypeSlug(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Description
-                  </label>
-                  <Input
-                    type="text"
-                    placeholder="Optional description..."
-                    value={newTypeDesc}
-                    onChange={(e) => setNewTypeDesc(e.target.value)}
-                  />
-                </div>
-
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={createDocTypeMutation.isPending || !newTypeName.trim()}
-                  className="w-full mt-2"
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  {createDocTypeMutation.isPending ? 'Creating...' : 'Add Type'}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-6 text-xs text-[#656d76] dark:text-[#848d97]">
+                        No custom document types configured yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

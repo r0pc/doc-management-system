@@ -76,6 +76,30 @@ export const DEV_PERSONAS: Persona[] = [
   },
 ];
 
+function personaToClaims(persona: Persona): UserClaims {
+  return {
+    sub: `dev-${persona.id}`,
+    tenant_id: persona.tenantId,
+    department_id: persona.departmentId,
+    role: persona.role,
+    clearance_rank: persona.clearance,
+    name: persona.label,
+  };
+}
+
+// Base64Url helper
+function encodeBase64Url(input: string | Uint8Array): string {
+  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary)
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
 // Simple JWT parser (payload only)
 function parseJwt(token: string): UserClaims | null {
   try {
@@ -104,35 +128,56 @@ function parseJwt(token: string): UserClaims | null {
   }
 }
 
-// Dev token generator shim for local preview/development
-function createDevJwtShim(persona: Persona): string {
+// Real HMAC-SHA256 signature generator using Web Crypto API
+async function signJwtHS256(header: object, payload: object, secret: string): Promise<string> {
+  if (typeof window === 'undefined' || !window.crypto || !window.crypto.subtle) {
+    // Fallback for tests if crypto.subtle not available
+    const h = encodeBase64Url(JSON.stringify(header));
+    const p = encodeBase64Url(JSON.stringify(payload));
+    return `${h}.${p}.mock_signature`;
+  }
+
+  const enc = new TextEncoder();
+  const headerB64 = encodeBase64Url(JSON.stringify(header));
+  const payloadB64 = encodeBase64Url(JSON.stringify(payload));
+  const data = enc.encode(`${headerB64}.${payloadB64}`);
+
+  const key = await window.crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signature = await window.crypto.subtle.sign('HMAC', key, data);
+  const signatureB64 = encodeBase64Url(new Uint8Array(signature));
+
+  return `${headerB64}.${payloadB64}.${signatureB64}`;
+}
+
+async function createDevJwt(persona: Persona, secret = 'dev-only-secret-change-me'): Promise<string> {
   const header = { alg: 'HS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
   const payload = {
     sub: `dev-${persona.id}`,
     tenant_id: persona.tenantId,
     department_id: persona.departmentId,
-    department_path: persona.departmentLabel.toLowerCase(),
     role: persona.role,
     clearance_rank: persona.clearance,
-    name: persona.label,
-    email: `${persona.id}@dev.local`,
-    exp: Math.floor(Date.now() / 1000) + 86400 * 7,
+    iat: now,
+    exp: now + 86400 * 7,
+    aud: 'docmgmt-api',
   };
 
-  const encodeBase64Url = (obj: any) =>
-    btoa(JSON.stringify(obj))
-      .replace(/=/g, '')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_');
-
-  return `${encodeBase64Url(header)}.${encodeBase64Url(payload)}.devsignature`;
+  return signJwtHS256(header, payload, secret);
 }
 
 interface AuthContextType {
   token: string | null;
   user: UserClaims | null;
   currentPersona: Persona | null;
-  loginWithPersona: (persona: Persona) => void;
+  loginWithPersona: (persona: Persona) => Promise<void>;
   setCustomToken: (token: string) => void;
   logout: () => void;
 }
@@ -141,7 +186,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => getAuthToken());
-  const [user, setUser] = useState<UserClaims | null>(() => (token ? parseJwt(token) : null));
+  const [user, setUser] = useState<UserClaims | null>(() => {
+    if (token) return parseJwt(token);
+    return personaToClaims(DEV_PERSONAS[0]);
+  });
   const [currentPersona, setCurrentPersona] = useState<Persona | null>(() => {
     if (!token) return DEV_PERSONAS[0];
     const claims = parseJwt(token);
@@ -153,20 +201,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   });
 
+  const loginWithPersona = async (persona: Persona) => {
+    try {
+      const devToken = await createDevJwt(persona);
+      setAuthToken(devToken);
+      setToken(devToken);
+      setUser(personaToClaims(persona));
+      setCurrentPersona(persona);
+    } catch (e) {
+      console.error('Failed to create signed dev JWT:', e);
+    }
+  };
+
   useEffect(() => {
-    if (!token) {
-      // Auto-bootstrap with default Admin persona for seamless local dev
+    if (!getAuthToken()) {
+      // Async generate the real HS256 signed bearer token
       loginWithPersona(DEV_PERSONAS[0]);
     }
   }, []);
-
-  const loginWithPersona = (persona: Persona) => {
-    const devToken = createDevJwtShim(persona);
-    setAuthToken(devToken);
-    setToken(devToken);
-    setUser(parseJwt(devToken));
-    setCurrentPersona(persona);
-  };
 
   const setCustomToken = (newToken: string) => {
     setAuthToken(newToken);

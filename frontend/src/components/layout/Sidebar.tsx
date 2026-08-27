@@ -70,10 +70,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col justify-between shrink-0 min-h-[calc(100vh-4rem)] p-4 transition-colors">
-      <nav className="space-y-1.5">
-        <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-          Navigation
+    <aside className="w-60 border-r border-[#d0d7de] dark:border-[#30363d] bg-[#f6f8fa] dark:bg-[#0d1117] flex flex-col justify-between shrink-0 min-h-[calc(100vh-3.5rem)] p-3 transition-colors">
+      <nav className="space-y-1">
+        <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#656d76] dark:text-[#848d97]">
+          Repositories
         </div>
         {navItems.map((item) => {
           const isSelected = currentTab === item.id;
@@ -82,14 +82,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               key={item.id}
               type="button"
               onClick={() => onSelectTab(item.id)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 isSelected
-                  ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100'
+                  ? 'bg-[#0969da] text-white font-semibold shadow-xs dark:bg-[#1f6feb]'
+                  : 'text-[#1f2328] dark:text-[#e6edf3] hover:bg-[#eaeef2] dark:hover:bg-[#21262d]'
               }`}
             >
-              <div className="flex items-center gap-3">
-                <span className={isSelected ? 'text-white' : 'text-slate-400 dark:text-slate-500'}>
+              <div className="flex items-center gap-2.5">
+                <span className={isSelected ? 'text-white' : 'text-[#656d76] dark:text-[#848d97]'}>
                   {item.icon}
                 </span>
                 <span>{item.label}</span>
@@ -98,8 +98,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span
                   className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
                     isSelected
-                      ? 'bg-white text-blue-700'
-                      : 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300'
+                      ? 'bg-white text-[#0969da]'
+                      : 'bg-[#fff8c5] dark:bg-[#9e6a03]/40 text-[#9a6700] dark:text-[#f2cc60] border border-[#d4a72c]/40'
                   }`}
                 >
                   {item.badge}
@@ -120,12 +120,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </nav>
 
-      <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200/80 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-1">
-        <div className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
-          <Shield className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+      <div className="p-3 bg-white dark:bg-[#161b22] rounded-md border border-[#d0d7de] dark:border-[#30363d] text-[11px] text-[#656d76] dark:text-[#848d97] space-y-1">
+        <div className="flex items-center gap-1.5 font-semibold text-[#1f2328] dark:text-[#e6edf3]">
+          <Shield className="w-3.5 h-3.5 text-[#0969da] dark:text-[#2f81f7]" />
           <span>Security Model</span>
         </div>
-        <p className="text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+        <p className="text-[10px] leading-relaxed text-[#656d76] dark:text-[#848d97]">
           Two-axis enforcement: Clearance Rank × Department Subtree.
         </p>
       </div>
