@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-API_URL="${API_URL:-http://127.0.0.1:8901}"
+API_URL="${API_URL:-http://127.0.0.1:8000}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

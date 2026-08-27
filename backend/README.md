@@ -58,7 +58,8 @@ backend/app/
   classification/
     pipeline.py          # Stage coordination: rules -> ml -> review queue
     rules/
-      recognizers/       # Luhn card, CNIC province, IBAN, Passport recognizers
+      base.py            # Base recognizer interface & context-scoring window
+      recognizers.py     # Luhn card, CNIC province, IBAN, Passport recognizers
     ml/
       loader.py          # CalibratedClassifierCV v1 artifact contract loader
   db/
@@ -106,7 +107,7 @@ backend/app/
 | `storage_backend` | `"local" \| "minio"` | `"local"` | Storage driver backend |
 | `minio_endpoint` | `str` | `localhost:9000` | MinIO endpoint |
 | `minio_bucket_prefix` | `str` | `"docs-"` | Prefix for quarantine, primary, derived buckets |
-| `scan_enabled` | `bool` | `true` | ClamAV scanning toggle |
-| `upload_max_bytes` | `int` | `10000000` | Maximum upload size in bytes (10 MB default) |
+| `scan_enabled` | `bool` | `false` | ClamAV scanning toggle (dev default `false`; mandatory `true` in prod) |
+| `upload_max_bytes` | `int` | `104857600` | Maximum upload size in bytes (100 MiB default) |
 | `presign_ttl_seconds`| `int` | `90` | Presigned URL expiration (clamped to 60–120s) |
 | `dev_jwt_secret` | `str` | `...` | Secret for dev JWT verification |

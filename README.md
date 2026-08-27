@@ -64,7 +64,7 @@ uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 | **#7** | Identity validated against cached JWKS, no per-request IdP round-trips | `app/security/auth.py:OidcJwksVerifier` uses cached `PyJWKClient` with algorithm confusion defenses (`HS*` rejected in prod). |
 | **#8** | `check_monotonic` trigger: automated cannot lower, human lowering audited | `alembic/versions/0002_security_hardening.py` (`trg_check_monotonic`); human overrides audited in `access_log`. |
 | **#9** | Nothing matched defaults to `Internal` floor, never `Public` | `app/domain/policy.py:aggregate_level` and SQL coalesce enforce `DEFAULT_FLOOR_RANK = 2` (`Internal`). |
-| **#10** | Recogniser is pattern + structural validator + context words (±50 chars) | `app/classification/rules/recognizers/base.py` & `score_with_context` window helper. |
+| **#10** | Recogniser is pattern + structural validator + context words (±50 chars) | `app/classification/rules/recognizers.py`, `app/classification/rules/base.py` & `score_with_context` window helper. |
 | **#11** | Calibrated ML probabilities; cascade thresholds (ML ≥ 0.85, else review) | `app/classification/ml/loader.py` enforces `CalibratedClassifierCV` artifact contract v1; `classify` routes to review. |
 | **#12** | `findings` stores character offsets only, never matched sensitive text | `Finding` model, DB schema, and API wire models carry `(char_start, char_end, page_no, score)` only. |
 | **#13** | Never train on held-out evaluation set | `ml/export_training_data.py` & `ml/train_classifier.py` enforce strict train/val/eval segregation. |
