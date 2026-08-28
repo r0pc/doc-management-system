@@ -15,6 +15,9 @@ candidates join classifications through the pointer and document_text through
 current version are simply not searchable yet.
 """
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import Select, Subquery, false, func, or_, select
@@ -23,6 +26,7 @@ from app.db.models import Classification, DocType, Document, DocumentText, Secur
 from app.domain.models import DEFAULT_FLOOR_RANK, LevelName, UserCtx
 
 KEYWORD_ARM_LIMIT = 100
+VECTOR_ARM_LIMIT = 100
 
 
 def build_visible_candidates(
@@ -44,6 +48,9 @@ def build_visible_candidates(
             SecurityLevel.name.label("level_name"),
             DocType.name.label("doc_type_name"),
             DocumentText.tsv.label("tsv"),
+            # Both ranking signals are projected into the ONE filtered set, so
+            # neither arm has to reach past it to a raw table to rank (#27).
+            DocumentText.embedding.label("embedding"),
         )
         .join(Classification, Document.current_classification_id == Classification.id)
         .join(DocumentText, DocumentText.version_id == Classification.version_id)
@@ -100,14 +107,34 @@ def compose_keyword_subquery(candidates: Subquery, q: str) -> Select[Any]:
     )
 
 
-def compose_vector_subquery(candidates: Subquery) -> Select[Any]:
-    """Vector arm scaffold: ZERO rows until embeddings exist. The rank window
-    is already in final shape so activation is a predicate swap, not a redesign
-    (#29 ranks are fused; raw scores are never compared across arms)."""
-    return select(
-        candidates.c.document_id,
-        candidates.c.version_id,
-        # vector arm activates when embeddings exist (#29 ranks fused, scores
-        # never compared); ordering placeholder keeps the window deterministic.
-        func.row_number().over(order_by=candidates.c.version_id).label("vec_rank"),
-    ).where(false())
+def compose_vector_subquery(
+    candidates: Subquery, query_embedding: Sequence[float] | None = None
+) -> Select[Any]:
+    """Vector arm: pgvector cosine ranking over the SAME filtered candidates.
+
+    ``query_embedding is None`` — no artifact, no encoder, or a query we could
+    not embed — keeps the historic zero-row shape, so hybrid search degrades to
+    keyword-only rather than failing. The visibility predicate rides inside the
+    candidates subquery either way (#27); as with the keyword arm the LIMIT
+    applies AFTER the window, truncating a ranked filtered set.
+
+    Only ranks leave this arm. Cosine distance is never returned or compared
+    against ``ts_rank``; fusion is reciprocal-rank only (#29).
+    """
+    if query_embedding is None:
+        return select(
+            candidates.c.document_id,
+            candidates.c.version_id,
+            func.row_number().over(order_by=candidates.c.version_id).label("vec_rank"),
+        ).where(false())
+    distance = candidates.c.embedding.cosine_distance(list(query_embedding))
+    return (
+        select(
+            candidates.c.document_id,
+            candidates.c.version_id,
+            func.row_number().over(order_by=distance.asc()).label("vec_rank"),
+        )
+        .where(candidates.c.embedding.is_not(None))
+        .order_by(distance.asc())
+        .limit(VECTOR_ARM_LIMIT)
+    )

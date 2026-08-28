@@ -121,7 +121,9 @@ def test_keyword_arm_matches_and_ranks_over_filtered_subquery() -> None:
     assert str(TENANT) in param_values(kw)
 
 
-def test_vector_arm_is_zero_row_scaffold_with_rank_window() -> None:
+def test_vector_arm_degrades_to_zero_rows_without_a_query_embedding() -> None:
+    """No artifact/encoder: the arm contributes nothing and search is keyword-only.
+    The active cosine-ranked shape is proven in test_vector_arm.py."""
     candidates = build_visible_candidates(make_user(tenant_id=TENANT)).subquery(name="candidates")
     vec = compose_vector_subquery(candidates)
     sql = compile_sql(vec)

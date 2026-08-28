@@ -8,6 +8,17 @@
 # job state must be answerable from SQL, so the schema must exist first).
 # The read-only scripts mount bridges the gap until the Dockerfile COPYs
 # scripts/ into the image.
+#
+# Model artifacts (self-hosting, hard requirement):
+#   * The ENCODER (BAAI/bge-small-en-v1.5) is baked into the image at build
+#     time and read offline at runtime - see backend/Dockerfile. Nothing calls
+#     a hosted inference API.
+#   * The TRAINED CLASSIFIER (model.joblib) is NOT in the image: it is
+#     gitignored, not redistributable, and AGENTS.md forbids committing model
+#     weights. api/worker/worker-ocr bind-mount ./backend/var/models READ-ONLY
+#     and point MODEL_ARTIFACT_PATH at it. Drop a trained model.joblib there to
+#     enable ML classification; with the directory empty the loader returns
+#     None and every document routes to human review, which is a normal state.
 
 services:
   postgres:
@@ -80,7 +91,7 @@ services:
     entrypoint: ["./scripts/entrypoint-api.sh"]
     command: ["alembic", "upgrade", "head"]
     environment:
-      DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
     env_file:
       - path: .env
         required: false
@@ -97,11 +108,16 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - storage-data:/srv/app/var/storage
+      # Read-only: the artifact is operator-supplied input, never worker output.
+      - ./backend/var/models:/srv/app/var/models:ro
     environment:
       DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local # dev default; switch to minio with real buckets later
       SCAN_ENABLED: "true"
+      # The API embeds the SEARCH QUERY (not documents) for the pgvector arm;
+      # it reads the manifest so query and corpus vectors share one model.
+      MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib
     env_file:
       - path: .env
         required: false
@@ -122,12 +138,19 @@ services:
     command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "default", "-l", "info", "--pool=solo"] # pool=solo dev-only; prod uses prefork/gevent
     volumes:
       - storage-data:/srv/app/var/storage
+      - ./backend/var/models:/srv/app/var/models:ro
     environment:
       DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
       SCAN_ENABLED: "true"
       CLAMAV_HOST: clamav
+      MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib
+      # Invariant #11's ML cascade gate. Overridable so it can be recalibrated
+      # once a REAL labelled hold-out exists: today's metrics.json reports no
+      # real slice (see ml/artifact_contract.md), so 0.85 is a default, not a
+      # measured operating point.
+      ML_CONFIDENCE_THRESHOLD: "${ML_CONFIDENCE_THRESHOLD:-0.85}"
     env_file:
       - path: .env
         required: false
@@ -148,12 +171,19 @@ services:
     command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "ocr", "-l", "info", "--pool=solo"] # dedicated OCR queue; never merge with default
     volumes:
       - storage-data:/srv/app/var/storage
+      - ./backend/var/models:/srv/app/var/models:ro
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
+      DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
       SCAN_ENABLED: "true"
       CLAMAV_HOST: clamav
+      MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib
+      # Invariant #11's ML cascade gate. Overridable so it can be recalibrated
+      # once a REAL labelled hold-out exists: today's metrics.json reports no
+      # real slice (see ml/artifact_contract.md), so 0.85 is a default, not a
+      # measured operating point.
+      ML_CONFIDENCE_THRESHOLD: "${ML_CONFIDENCE_THRESHOLD:-0.85}"
     env_file:
       - path: .env
         required: false

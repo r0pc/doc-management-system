@@ -8,8 +8,10 @@ scikit-learn is absent (host/dev venvs ship without the ML stack by design —
 self-hosting invariant; nothing is pulled in at import time).
 """
 
+from __future__ import annotations
+
 import importlib.util
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from typing import Final
 
@@ -33,6 +35,37 @@ DOC_TYPE_LABELS: Final[frozenset[str]] = frozenset(
 SECURITY_LEVEL_LABELS: Final[frozenset[str]] = frozenset(
     {"Public", "Internal", "Confidential", "Restricted"}
 )
+
+#: Model label (a training slug) -> the ``doc_types.name`` it denotes.
+#:
+#: The heads emit slugs from ml/templates.py; the persisted taxonomy is the
+#: ``doc_types`` tree seeded by migration 0003 and edited by admins thereafter.
+#: This map is a pure NAME translation, never a row factory: resolution looks
+#: the name up and yields NULL + a log line when no row exists (see
+#: app.workers.jobs.resolve_doc_type_id). Model output must not be able to
+#: mint taxonomy rows — a drifted or swapped artifact would then rewrite the
+#: tenant's document-type vocabulary as a side effect of ingestion.
+#:
+#: ``hr_letter`` is deliberately mapped to a name migration 0003 does NOT seed.
+#: The seed's ``HR`` node is the parent CATEGORY of ``Disciplinary Notice``, not
+#: a letter type; silently coarsening a leaf prediction onto its parent would
+#: record a type the model never predicted. Until an admin creates "HR Letter"
+#: under "HR" via the taxonomy CRUD, those predictions resolve to NULL and log.
+DOC_TYPE_LABEL_TO_TAXONOMY_NAME: Final[Mapping[str, str]] = {
+    "contract": "Contract",
+    "vendor_msa": "Vendor MSA",
+    "invoice": "Invoice",
+    "hr_letter": "HR Letter",
+    "disciplinary_notice": "Disciplinary Notice",
+    "monthly_report": "Monthly Report",
+    "policy_memo": "Policy Memo",
+}
+
+
+def taxonomy_name_for_label(label: str) -> str | None:
+    """``doc_types.name`` a model label denotes; None when the label is unknown."""
+    return DOC_TYPE_LABEL_TO_TAXONOMY_NAME.get(label)
+
 
 _LABEL_GROUPS: Final[tuple[str, str]] = ("doc_type", "security_level")
 _WARNING_PREFIX: Final[str] = "warning:"

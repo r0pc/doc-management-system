@@ -197,3 +197,49 @@ def test_compatible_payload_loads_into_ml_artifact(
     assert artifact is not None
     assert artifact.manifest.dim == 384
     assert artifact.payload == payload
+
+
+def test_predict_type_returns_none_when_artifact_is_none() -> None:
+    from app.classification.ml.loader import predict_type
+
+    assert predict_type(None, "Sample document text") is None
+
+
+def test_predict_type_with_mocked_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.classification.ml.loader import MlArtifact, predict_type
+
+    class FakeEncoder:
+        def encode(self, texts: list[str], show_progress_bar: bool = False) -> list[list[float]]:
+            return [[0.1] * 384]
+
+    class FakeLabelEncoder:
+        def __init__(self) -> None:
+            self.classes_ = ["contract", "invoice"]
+
+    class FakeModel:
+        def predict_proba(self, _embeddings: object) -> list[list[float]]:
+            return [[0.95, 0.05]]
+
+    payload = {
+        "manifest": valid_manifest_dict(),
+        "models": {
+            "doc_type": {
+                "model": FakeModel(),
+                "label_encoder": FakeLabelEncoder(),
+            }
+        },
+    }
+    artifact = MlArtifact(
+        path=tmp_path / "model.joblib",
+        payload=payload,
+        manifest=parse_manifest(valid_manifest_dict()),
+    )
+    monkeypatch.setattr(
+        "app.classification.ml.loader._get_encoder", lambda _model_id: FakeEncoder()
+    )
+
+    result = predict_type(artifact, "This is a contract agreement between Party A and Party B.")
+    assert result is not None
+    label, prob = result
+    assert label == "contract"
+    assert prob == 0.95

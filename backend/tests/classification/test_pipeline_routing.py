@@ -12,7 +12,13 @@ import pytest
 
 from app.classification.ml.artifact import ArtifactManifest
 from app.classification.ml.loader import MlArtifact
-from app.classification.pipeline import ClassificationOutcome, classify
+from app.classification.pipeline import (
+    DEFAULT_ML_THRESHOLD,
+    ML_THRESHOLD_ENV,
+    ClassificationOutcome,
+    classify,
+    ml_threshold_from_env,
+)
 from app.domain.models import Finding
 from app.domain.taxonomy import Taxonomy
 
@@ -34,7 +40,7 @@ def fake_artifact() -> MlArtifact:
 
 @pytest.fixture()
 def no_ml(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.classification.pipeline.predict_type", lambda *_: None)
+    monkeypatch.setattr("app.classification.pipeline.predict_type", lambda *_, **__: None)
 
 
 def test_outcome_is_frozen() -> None:
@@ -63,7 +69,9 @@ def test_absent_artifact_routes_to_review(no_ml: None) -> None:
 def test_sub_threshold_prediction_routes_to_review(
     monkeypatch: pytest.MonkeyPatch, no_ml: None
 ) -> None:
-    monkeypatch.setattr("app.classification.pipeline.predict_type", lambda *_: ("invoice", 0.84))
+    monkeypatch.setattr(
+        "app.classification.pipeline.predict_type", lambda *_, **__: ("invoice", 0.84)
+    )
     outcome = classify("text", Taxonomy.default(), fake_artifact())
     assert outcome.needs_review is True
     assert outcome.decided_by == "rules"
@@ -71,7 +79,9 @@ def test_sub_threshold_prediction_routes_to_review(
 
 
 def test_confident_prediction_decides_by_ml(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.classification.pipeline.predict_type", lambda *_: ("invoice", 0.86))
+    monkeypatch.setattr(
+        "app.classification.pipeline.predict_type", lambda *_, **__: ("invoice", 0.86)
+    )
     outcome = classify("text", Taxonomy.default(), fake_artifact())
     assert outcome.decided_by == "ml"
     assert outcome.doc_type == "invoice"
@@ -80,7 +90,9 @@ def test_confident_prediction_decides_by_ml(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_custom_threshold_gates_the_ml_decision(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.classification.pipeline.predict_type", lambda *_: ("invoice", 0.86))
+    monkeypatch.setattr(
+        "app.classification.pipeline.predict_type", lambda *_, **__: ("invoice", 0.86)
+    )
     outcome = classify("text", Taxonomy.default(), fake_artifact(), ml_threshold=0.90)
     assert outcome.needs_review is True
     assert outcome.decided_by == "rules"
@@ -109,3 +121,42 @@ def test_recognizer_findings_flow_into_the_outcome(monkeypatch: pytest.MonkeyPat
 def test_classify_signature_rejects_positional_threshold(no_ml: None) -> None:
     with pytest.raises(TypeError):
         classify("text", Taxonomy.default(), None, 0.85)  # type: ignore[misc]
+
+
+def test_classify_forwards_the_precomputed_embedding_to_the_ml_layer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#6: the embed stage's vector must reach predict_type, not be recomputed."""
+    seen: dict[str, object] = {}
+
+    def spy(artifact: object, text: str, *, embedding: object = None) -> tuple[str, float]:
+        seen["embedding"] = embedding
+        return ("invoice", 0.99)
+
+    monkeypatch.setattr("app.classification.pipeline.predict_type", spy)
+    classify("text", Taxonomy.default(), fake_artifact(), embedding=[0.5] * 384)
+
+    assert seen["embedding"] == [0.5] * 384
+
+
+# --- cascade threshold: a DEFAULT, recalibratable without a code change -----
+
+
+def test_threshold_default_is_the_invariant_11_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ML_THRESHOLD_ENV, raising=False)
+    assert DEFAULT_ML_THRESHOLD == 0.85
+    assert ml_threshold_from_env() == 0.85
+
+
+def test_threshold_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(ML_THRESHOLD_ENV, "0.92")
+    assert ml_threshold_from_env() == pytest.approx(0.92)
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "not-a-number", "0", "-0.5", "1.5"])
+def test_threshold_falls_back_to_the_default_on_anything_odd(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    """A typo in the environment must never silently disable the review gate."""
+    monkeypatch.setenv(ML_THRESHOLD_ENV, raw)
+    assert ml_threshold_from_env() == DEFAULT_ML_THRESHOLD

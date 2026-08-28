@@ -66,7 +66,9 @@ def _fit_calibrated(clf_classes, y_train):
 
 
 def _slice_metrics(recall_score, y_true, y_pred, classes) -> dict:
-    values = recall_score(y_true, y_pred, labels=classes, average=None, zero_division=0)
+    values = recall_score(
+        y_true, y_pred, labels=list(range(len(classes))), average=None, zero_division=0
+    )
     per_class = {str(c): round(float(v), 4) for c, v in zip(classes, values, strict=True)}
     return {
         "support": int(len(y_true)),

@@ -28,9 +28,13 @@ parsers = [
     "python-docx>=1.1",
     "openpyxl>=3.1",
 ]
+# Inference stack for the worker/api image. joblib is listed explicitly even
+# though scikit-learn pulls it in: app/classification/ml/loader.py probes for
+# it by name, so it is a direct dependency of ours, not a transitive detail.
 ml = [
     "scikit-learn>=1.5",
     "sentence-transformers>=3.0",
+    "joblib>=1.3",
 ]
 dev = [
     "pytest>=8",

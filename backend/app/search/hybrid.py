@@ -9,14 +9,18 @@ Divergence from spec §4.2 SQL (documented decision): the spec sketches one
 statement fusing both arms via SUM(1/(60+r)) over UNION ALL. Phase 1 executes
 each arm separately (two round-trips are acceptable at this scale) and fuses
 in Python via rrf_merge — the same RRF math with identical k=60, fully
-unit-tested, avoiding fragile cross-dialect window plumbing until the vector
-arm activates. Revisit when embeddings go live.
+unit-tested, avoiding fragile cross-dialect window plumbing. Both arms are now
+live; each is still its own round-trip, and only RANKS cross the boundary
+between them, so no arm's raw score can leak into the other's (#29).
 
 Facets and snippets derive ONLY from the already-filtered candidate set (#28):
 facet statements GROUP BY over the same candidates subquery the arms select
 from, and snippets are generated exclusively for fused results.
 """
 
+from __future__ import annotations
+
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -31,6 +35,8 @@ from app.search.filters import (
     compose_keyword_subquery,
     compose_vector_subquery,
 )
+
+logger = logging.getLogger(__name__)
 
 RRF_K = 60
 DEFAULT_LIMIT = 20
@@ -210,17 +216,27 @@ async def search_documents(
     limit: int = DEFAULT_LIMIT,
     level: LevelName | None = None,
     doc_type: str | None = None,
+    query_embedding: Sequence[float] | None = None,
 ) -> SearchResult:
     """Execute both arms over the caller's filtered candidates, fuse via RRF.
 
     Every downstream artifact — results, metadata, facets, totals — derives
     from the ONE filtered candidate set (#27/#28); nothing is filtered after
     fusion.
+
+    ``query_embedding`` activates the vector arm. It is computed by the caller
+    (see app/api/v1/search.py) rather than here so this orchestrator keeps no
+    model dependency: None simply yields a zero-row vector arm and keyword-only
+    results, which is the correct behaviour on a deployment with no artifact.
     """
     candidates_stmt = build_visible_candidates(user, level=level, doc_type=doc_type)
     candidates = candidates_stmt.subquery(name="candidates")
+    if query_embedding is None:
+        logger.debug("vector_arm_inactive: no query embedding; keyword-only search")
     keyword_rows = await _run_keyword_arm(session, compose_keyword_subquery(candidates, q))
-    vector_rows = await _run_vector_arm(session, compose_vector_subquery(candidates))
+    vector_rows = await _run_vector_arm(
+        session, compose_vector_subquery(candidates, query_embedding)
+    )
     fused = rrf_merge(
         [_to_hit(row) for row in keyword_rows],
         [_to_hit(row) for row in vector_rows],
