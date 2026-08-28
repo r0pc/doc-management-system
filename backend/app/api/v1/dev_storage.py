@@ -16,15 +16,19 @@ is constant-time and expiry-checked. Bodies stream as
 ``application/octet-stream`` — dev tooling does not need accurate media types.
 """
 
+from __future__ import annotations
+
+import io
 import time
 from typing import BinaryIO
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from starlette.responses import StreamingResponse
-from starlette.status import HTTP_403_FORBIDDEN
+from starlette.status import HTTP_403_FORBIDDEN, HTTP_413_CONTENT_TOO_LARGE
 
 from app.api import deps
 from app.api.v1.documents import _stream_handle
+from app.config import Settings
 from app.storage.base import Storage
 
 router = APIRouter(tags=["dev-storage"])
@@ -57,3 +61,25 @@ async def get_dev_object(
         media_type="application/octet-stream",
         headers={"Content-Length": str(_content_length(handle))},
     )
+
+
+@router.put("/dev-storage/{key:path}")
+async def put_dev_object(
+    key: str,
+    expires: int,
+    sig: str,
+    request: Request,
+    storage: Storage = Depends(deps.get_storage),
+) -> Response:
+    verify = getattr(storage, "verify_presign", None)
+    if not callable(verify) or not verify(key, expires, sig, now=_now()):
+        raise HTTPException(HTTP_403_FORBIDDEN, "invalid or expired signature")
+    # Bounded read: this stands in for the object store's own upload limit, so
+    # a dev PUT cannot buffer an unbounded body into the API process.
+    limit = Settings().upload_max_bytes
+    body = await request.body()
+    if len(body) > limit:
+        raise HTTPException(HTTP_413_CONTENT_TOO_LARGE, f"body exceeds {limit} bytes")
+    content_type = request.headers.get("content-type", "application/octet-stream")
+    storage.put(key, io.BytesIO(body), content_type=content_type)
+    return Response(status_code=200)

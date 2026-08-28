@@ -151,8 +151,8 @@ def test_embed_is_placeholder_noop_but_journaled(pipeline, monkeypatch) -> None:
     tasks.process_upload_chain(str(DOC_ID), str(VER_ID), key)
 
     assert "embed" in pipeline.journal.stages_in_state("succeeded")
-    # Placeholder contract: nothing downstream writes an embedding; vector stays NULL.
-    assert all("embedding" not in upsert for upsert in pipeline.store.text_upserts)
+    # Contract: when no model is active, vector stays NULL (None).
+    assert all(upsert.get("embedding") is None for upsert in pipeline.store.text_upserts)
 
 
 def test_ctx_dict_shape_is_exactly_the_six_contract_keys() -> None:

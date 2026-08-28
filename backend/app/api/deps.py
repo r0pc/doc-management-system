@@ -27,6 +27,8 @@ records. It is a plain function called by handlers — never middleware, never
 a background task.
 """
 
+from __future__ import annotations
+
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -197,7 +199,7 @@ def _client_ip(request: Request) -> str | None:
 async def record_audit(
     session: AsyncSession,
     *,
-    tenant_id: uuid.UUID | None,
+    tenant_id: uuid.UUID,
     document_id: uuid.UUID | None,
     actor_id: uuid.UUID | None,
     action: str,
@@ -207,6 +209,11 @@ async def record_audit(
 
     ``access_log`` carries bare uuids with no FKs (#24); this write must be
     awaited inside the same ``tenant_session`` block as the action itself.
+
+    ``tenant_id`` is required, not optional: ``access_log`` is under RLS since
+    0004 and NOT NULL since 0005 (#26), so a None here is no longer a nullable
+    column - it is a row the database refuses and no tenant could ever read.
+    Callers always have ``UserCtx.tenant_id``; the type says so.
     """
     await session.execute(
         insert(AccessLog).values(

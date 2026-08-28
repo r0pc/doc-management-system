@@ -113,7 +113,10 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     async def spy(
         session: Any,
         *,
-        tenant_id: UUID | None,
+        # tenant_id is non-optional: access_log.tenant_id is NOT NULL and the
+        # RLS WITH CHECK compares it to app.tenant_id, so an unattributed audit
+        # write is rejected by the database (see migration 0005).
+        tenant_id: UUID,
         document_id: UUID | None,
         actor_id: UUID | None,
         action: str,
@@ -137,7 +140,9 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def mock_provision_actor(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_provision(session: Any, user: UserCtx) -> UUID:
         return ACTOR_ID
+
     monkeypatch.setattr(deps, "provision_actor", fake_provision)
+
 
 def build_app(
     monkeypatch: pytest.MonkeyPatch,
@@ -152,7 +157,10 @@ def build_app(
     async def opener(tenant_id: UUID) -> AsyncIterator[object]:
         yield SENTINEL_SESSION
 
-    app = create_app()
+    # Pass the same Settings that get overridden below: router mounting is a
+    # construction-time decision, so dev-only routers (dev-storage, dev/token)
+    # exist only when the app is BUILT with env="dev".
+    app = create_app(settings_override)
     if user is not None:
 
         async def current_user() -> UserCtx:

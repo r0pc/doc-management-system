@@ -122,9 +122,12 @@ INTENT_JSON=$(curl -sf -X POST "${API_URL}/v1/uploads" \
 UPLOAD_ID=$(echo "${INTENT_JSON}" | "${PYTHON_BIN}" -c "import sys, json; print(json.load(sys.stdin)['upload_id'])")
 PUT_URL=$(echo "${INTENT_JSON}" | "${PYTHON_BIN}" -c "import sys, json; print(json.load(sys.stdin)['presigned_put']['url'])")
 
-# Write bytes to storage destination
-curl -sf -X PUT "${PUT_URL}" -H "Content-Type: application/pdf" --data-binary @"${PDF_FILE}" || \
-  curl -sf -X POST "${PUT_URL}" --data-binary @"${PDF_FILE}" || true
+# Write bytes DIRECTLY to the presigned destination (#1: never through
+# the API). No POST fallback and no `|| true`: a failed upload must
+# surface here, not resurface later as an unexplained pipeline failure.
+curl -sf -X PUT "${PUT_URL}" -H "Content-Type: application/pdf" \
+  --data-binary @"${PDF_FILE}" \
+  || log_fail "presigned PUT of the test PDF failed"
 
 COMPLETE_JSON=$(curl -sf -X POST "${API_URL}/v1/uploads/${UPLOAD_ID}/complete" \
   -H "Authorization: Bearer ${TOKEN_EMP_T1}" \
@@ -244,8 +247,9 @@ EICAR_INTENT=$(curl -sf -X POST "${API_URL}/v1/uploads" \
 EICAR_UPLOAD_ID=$(echo "${EICAR_INTENT}" | "${PYTHON_BIN}" -c "import sys, json; print(json.load(sys.stdin)['upload_id'])")
 EICAR_PUT_URL=$(echo "${EICAR_INTENT}" | "${PYTHON_BIN}" -c "import sys, json; print(json.load(sys.stdin)['presigned_put']['url'])")
 
-curl -sf -X PUT "${EICAR_PUT_URL}" -H "Content-Type: application/pdf" --data-binary @"${EICAR_FILE}" || \
-  curl -sf -X POST "${EICAR_PUT_URL}" --data-binary @"${EICAR_FILE}" || true
+curl -sf -X PUT "${EICAR_PUT_URL}" -H "Content-Type: application/pdf" \
+  --data-binary @"${EICAR_FILE}" \
+  || log_fail "presigned PUT of the EICAR payload failed"
 
 curl -sf -X POST "${API_URL}/v1/uploads/${EICAR_UPLOAD_ID}/complete" \
   -H "Authorization: Bearer ${TOKEN_ADMIN_T1}" \

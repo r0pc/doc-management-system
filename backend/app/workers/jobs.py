@@ -15,6 +15,9 @@ stage tasks stay orchestration-only. They run against a sync engine built from
 ``Settings.sync_db_url`` — Celery workers are synchronous by design.
 """
 
+from __future__ import annotations
+
+import logging
 import uuid
 from collections.abc import Callable
 from typing import Final, Protocol, TypeVar
@@ -23,11 +26,13 @@ from sqlalchemy import delete, select, text, update
 from sqlalchemy.engine import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.classification.ml.artifact import taxonomy_name_for_label
 from app.classification.pipeline import ClassificationOutcome
 from app.config import Settings
 from app.db.models import (
     Blob,
     Classification,
+    DocType,
     Document,
     DocumentKeyword,
     DocumentVersion,
@@ -37,6 +42,8 @@ from app.db.models import (
     ReviewItem,
     SecurityLevel,
 )
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -188,8 +195,14 @@ class ProcessingJobsJournal:
 
 def load_version_context(
     sessions: sessionmaker[Session], document_id: uuid.UUID, version_id: uuid.UUID
-) -> tuple[uuid.UUID, str]:
-    """Tenant id + recorded sha256 for the entry task's ctx dict."""
+) -> tuple[uuid.UUID, str | None]:
+    """Tenant id + recorded sha256 for the entry task's ctx dict.
+
+    The digest is NULL for a freshly completed upload — the API signs the
+    intent without ever reading the bytes (#1) — and is filled in by the
+    pipeline once it hashes the quarantined object. Callers must treat the
+    second element as optional.
+    """
     with sessions() as session, session.begin():
         row = session.execute(
             select(Document.tenant_id, DocumentVersion.blob_sha256)
@@ -257,6 +270,40 @@ def replace_keywords(
     return len(terms)
 
 
+def resolve_doc_type_id(session: Session, label: str | None) -> uuid.UUID | None:
+    """Map a model label onto an EXISTING ``doc_types`` row; None when it can't.
+
+    Two failure modes, both non-fatal and both logged, because a document with
+    an unresolved type is strictly better than a taxonomy corrupted by model
+    output:
+
+    * the label is not one this backend knows how to name (a stale or foreign
+      artifact) — ``doc_type_label_unknown``;
+    * the name is known but no row carries it (the taxonomy is admin-editable
+      via ``/v1/admin`` and migration 0003 does not seed every model label,
+      notably "HR Letter") — ``doc_type_row_absent``, whose fix is an admin
+      creating that row, not this worker inserting one.
+
+    Rows are NOT auto-created here: ``doc_types`` is the tenant-facing
+    vocabulary, and letting ingestion mint entries would let a swapped model
+    silently rewrite it.
+    """
+    if label is None:
+        return None
+    name = taxonomy_name_for_label(label)
+    if name is None:
+        logger.warning("doc_type_label_unknown label=%s", label)
+        return None
+    # doc_types is UNIQUE(parent_id, name), so a name could in principle repeat
+    # under two parents; order for determinism rather than raising on ambiguity.
+    doc_type_id = session.execute(
+        select(DocType.id).where(DocType.name == name).order_by(DocType.id).limit(1)
+    ).scalar_one_or_none()
+    if doc_type_id is None:
+        logger.warning("doc_type_row_absent label=%s name=%s", label, name)
+    return doc_type_id
+
+
 def record_classification(
     sessions: sessionmaker[Session],
     *,
@@ -268,6 +315,11 @@ def record_classification(
 
     Monotonicity authority is the DB ``check_monotonic`` trigger (#8): an
     IntegrityError raised here propagates so the stage journals failed.
+
+    ``outcome.doc_type`` is the ML label; :func:`resolve_doc_type_id` turns it
+    into a ``doc_types`` FK (or NULL + a log line). Without this the type half
+    of the cascade would be computed and thrown away, and every search facet
+    would read "unknown".
     """
     with sessions() as session, session.begin():
         level_id = session.execute(
@@ -288,7 +340,7 @@ def record_classification(
                 document_id=document_id,
                 version_id=version_id,
                 level_id=level_id,
-                doc_type_id=None,
+                doc_type_id=resolve_doc_type_id(session, outcome.doc_type),
                 confidence=outcome.confidence,
                 decided_by=outcome.decided_by,
             )
@@ -336,12 +388,14 @@ def upsert_document_text(
     body: str,
     char_count: int,
     ocr_used: bool,
+    embedding: list[float] | None = None,
 ) -> None:
-    """Index-row upsert; embedding stays NULL until the model server wave."""
+    """Index-row upsert with optional embedding vector."""
     statement = text(
         "INSERT INTO document_text (version_id, tsv, embedding, char_count, ocr_used)"
-        " VALUES (:version_id, to_tsvector('english', :body), NULL, :char_count, :ocr_used)"
+        " VALUES (:version_id, to_tsvector('english', :body), :embedding, :char_count, :ocr_used)"
         " ON CONFLICT (version_id) DO UPDATE SET tsv = EXCLUDED.tsv,"
+        " embedding = COALESCE(EXCLUDED.embedding, document_text.embedding),"
         " char_count = EXCLUDED.char_count, ocr_used = EXCLUDED.ocr_used"
     )
     with sessions() as session, session.begin():
@@ -350,6 +404,7 @@ def upsert_document_text(
             {
                 "version_id": str(version_id),
                 "body": body,
+                "embedding": str(embedding) if embedding is not None else None,
                 "char_count": char_count,
                 "ocr_used": ocr_used,
             },

@@ -19,6 +19,8 @@ queue, journals the extract stage skipped, then raises
 only, so Ignore halts the remaining links cleanly without surfacing as an error.
 """
 
+from __future__ import annotations
+
 import hashlib
 import io
 import json
@@ -34,7 +36,9 @@ from celery.exceptions import Ignore
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.classification.ml.loader import MlArtifact, embed_text, get_artifact
 from app.classification.pipeline import classify as run_classification
+from app.classification.pipeline import ml_threshold_from_env
 from app.config import Settings
 from app.domain.taxonomy import Taxonomy
 from app.extraction.base import NeedsOcrError, ParserUnavailable, UnknownMimeError
@@ -98,7 +102,10 @@ class PipelineCtx(TypedDict):
     document_id: str
     version_id: str
     tenant_id: str
-    sha256: str
+    # NULL until the pipeline reads the bytes: the API signs an upload intent
+    # without ever seeing content (#1), so content identity is established by
+    # _ensure_sha256 during scan/extract, not at intent time.
+    sha256: str | None
     bucket: str
     key: str
 
@@ -202,6 +209,21 @@ def _read_object(key: str) -> bytes:
         return handle.read()
 
 
+def _require_sha256(ctx: PipelineCtx) -> str:
+    """Digest for a post-extract stage; absence is a contract breach, not data.
+
+    Stages after extract can only run once ``_ensure_sha256`` has stamped the
+    ctx, so a None here means the chain was entered out of order rather than
+    that the document was malformed — fail loud instead of keying a derived
+    lookup on None.
+    """
+    sha256 = ctx["sha256"]
+    if sha256 is None:
+        msg = "pipeline ctx reached a post-extract stage without a content digest"
+        raise RuntimeError(msg)
+    return sha256
+
+
 def _read_derived_json(sha256: str) -> dict[str, object]:
     raw = _read_object(derived_key(sha256, "text.json"))
     parsed: dict[str, object] = json.loads(raw.decode("utf-8"))
@@ -217,11 +239,28 @@ def _write_derived_json(sha256: str, payload: dict[str, object]) -> None:
     )
 
 
+def _ensure_sha256(ctx: PipelineCtx, data: bytes) -> str:
+    """Establish (once) the content identity every derived key hangs off.
+
+    The API never sees the bytes (#1), so ``document_versions.blob_sha256`` is
+    NULL at intent time and the pipeline is what establishes content identity.
+    Populating ctx here — not only on the promotion path, which the dev
+    fail-open scan gate skips — is what keeps ``derived_key`` resolvable and
+    the #5 idempotency guard content-addressed for every stage downstream.
+    A digest already on the ctx is authoritative: disagreement means the
+    quarantined bytes changed under us.
+    """
+    digest = hashlib.sha256(data).hexdigest()
+    recorded = ctx["sha256"]
+    if recorded is not None and recorded != digest:
+        raise ShaMismatchError
+    ctx["sha256"] = digest
+    return digest
+
+
 def _promote_to_primary(ctx: PipelineCtx, data: bytes) -> None:
     """Quarantine -> primary promotion: verify, put, record, then delete (#16)."""
-    digest = hashlib.sha256(data).hexdigest()
-    if ctx["sha256"] is not None and digest != ctx["sha256"]:
-        raise ShaMismatchError
+    digest = _ensure_sha256(ctx, data)
     key = primary_key(uuid.UUID(ctx["tenant_id"]), digest)
     from app.extraction.sniff import sniff_mime
 
@@ -270,13 +309,16 @@ def _scan_body(ctx: PipelineCtx) -> None:
 
 def _extract_body(ctx: PipelineCtx) -> None:
     data = _read_object(ctx["key"])
+    # Scan promotes and stamps the digest, but the dev fail-open gate can skip
+    # that stage entirely; derived keys must resolve either way.
+    sha256 = _ensure_sha256(ctx, data)
     try:
         extracted = extract_document(data)
     except NeedsOcrError:
         enqueue_ocr.apply_async(args=[dict(ctx)])
         raise
     _write_derived_json(
-        ctx["sha256"],
+        sha256,
         {
             "text": extracted.text,
             "pages": [{"page_no": page.page_no, "text": page.text} for page in extracted.pages],
@@ -288,7 +330,7 @@ def _extract_body(ctx: PipelineCtx) -> None:
 
 
 def _keywords_body(ctx: PipelineCtx) -> None:
-    payload = _read_derived_json(ctx["sha256"])
+    payload = _read_derived_json(_require_sha256(ctx))
     terms = FrequencyFallback().extract(_require(payload, "text", str)).terms
     replace_keywords(
         _sessions(),
@@ -297,9 +339,46 @@ def _keywords_body(ctx: PipelineCtx) -> None:
     )
 
 
+def _artifact() -> MlArtifact | None:
+    """The process-cached model artifact at the configured path (None is normal)."""
+    return get_artifact(Path(_settings().model_artifact_path))
+
+
+def _derived_embedding(payload: dict[str, object]) -> list[float] | None:
+    """The embed stage's vector off the derived artifact, if it ran and worked."""
+    stored = payload.get("embedding")
+    if not isinstance(stored, list):
+        return None
+    return [float(value) for value in stored]
+
+
+def _embed_body(ctx: PipelineCtx) -> None:
+    """THE forward pass over this document (#6).
+
+    The vector lands on the derived artifact and is read back by BOTH classify
+    (as ``embedding=``) and index (into ``document_text.embedding`` for the
+    pgvector arm). No later stage may encode this text again.
+    """
+    payload = _read_derived_json(_require_sha256(ctx))
+    vector = embed_text(_artifact(), _require(payload, "text", str))
+    if vector is None:
+        logger.info("embed_unavailable", extra=_ids("embed", ctx))
+        return
+    payload["embedding"] = vector
+    _write_derived_json(_require_sha256(ctx), payload)
+
+
 def _classify_body(ctx: PipelineCtx) -> None:
-    payload = _read_derived_json(ctx["sha256"])
-    outcome = run_classification(_require(payload, "text", str), Taxonomy.default(), None)
+    payload = _read_derived_json(_require_sha256(ctx))
+    outcome = run_classification(
+        _require(payload, "text", str),
+        Taxonomy.default(),
+        _artifact(),
+        ml_threshold=ml_threshold_from_env(),
+        # Reuse of the embed stage's vector; re-encoding here would be a second
+        # pass over the same text with the same model, i.e. a bug (#6).
+        embedding=_derived_embedding(payload),
+    )
     record_classification(
         _sessions(),
         document_id=uuid.UUID(ctx["document_id"]),
@@ -309,13 +388,15 @@ def _classify_body(ctx: PipelineCtx) -> None:
 
 
 def _index_body(ctx: PipelineCtx) -> None:
-    payload = _read_derived_json(ctx["sha256"])
+    payload = _read_derived_json(_require_sha256(ctx))
+    embedding = payload.get("embedding")
     upsert_document_text(
         _sessions(),
         version_id=uuid.UUID(ctx["version_id"]),
         body=_require(payload, "text", str),
         char_count=_require(payload, "char_count", int),
         ocr_used=_require(payload, "ocr_used", bool),
+        embedding=embedding if isinstance(embedding, list) else None,
     )
     mark_document_ready(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
 
@@ -374,7 +455,7 @@ def _run_stage(
         journal.mark_failed(job_row_id, "content matched no known signature")
         mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         journal.mark_failed(job_row_id, "unsupported or malformed content")
         mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
@@ -415,9 +496,7 @@ def extract_keywords(ctx: PipelineCtx) -> PipelineCtx:
 
 @pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
 def embed(ctx: PipelineCtx) -> PipelineCtx:
-    # Placeholder: embedding arrives with the model server; document_text.embedding
-    # stays NULL and the #6 single-compute contract is preserved for that pass.
-    return _run_stage("embed", ctx, lambda: None, requires=("extract",))
+    return _run_stage("embed", ctx, lambda: _embed_body(ctx), requires=("extract",))
 
 
 @pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
