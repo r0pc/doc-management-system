@@ -49,8 +49,12 @@ EXPECTED_INDEXES = frozenset(
     }
 )
 
+# access_log joined this set in 0004: the audit trail is tenanted and must be
+# isolated like any other tenanted table (#26). Its rows carry a tenant_id that
+# 0005 backfills and pins NOT NULL, so no row can hide from the policy.
 RLS_TABLES = frozenset(
     {
+        "access_log",
         "tenants",
         "departments",
         "users",

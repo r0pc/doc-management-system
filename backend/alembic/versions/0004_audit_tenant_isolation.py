@@ -5,6 +5,7 @@ Revises: 0003_seed_taxonomy
 Create Date: 2026-08-27 12:00:00.000000
 
 """
+
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -14,6 +15,7 @@ revision = "0004_audit_tenant_isolation"
 down_revision = "0003_seed_taxonomy"
 branch_labels = None
 depends_on = None
+
 
 def upgrade() -> None:
     # CS-3/C-2: Add tenant_id to access_log
@@ -74,6 +76,7 @@ def upgrade() -> None:
             FOR EACH ROW EXECUTE FUNCTION check_monotonic()
         """
     )
+
 
 def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS trg_check_monotonic ON classifications")
