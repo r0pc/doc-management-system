@@ -71,14 +71,56 @@ export function setAuthToken(token: string | null) {
  * `Authorization` header. Direct-to-storage traffic goes through `putDirect`,
  * which never sends credentials (invariant #1).
  */
+/**
+ * True when `path` contains a character that makes a naive string check and the
+ * WHATWG URL parser disagree about where the authority begins.
+ *
+ * Written as a code-point scan rather than a regex so the two hazardous classes
+ * are stated outright:
+ *  - C0 controls and DEL: the parser STRIPS tab (0x09), LF (0x0A) and CR (0x0D)
+ *    before parsing, so "/<TAB>/evil.com" becomes "//evil.com";
+ *  - backslash (0x5C): for special schemes the parser treats it as "/", so
+ *    "/\evil.com" reaches the authority state the same way.
+ *
+ * Both spellings satisfy `startsWith('//') === false`.
+ */
+function hasUrlParserHazard(path: string): boolean {
+  for (let i = 0; i < path.length; i += 1) {
+    const code = path.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f || code === 0x5c) return true;
+  }
+  return false;
+}
+
 function assertApiPath(path: string): void {
-  if (!path.startsWith('/') || path.startsWith('//')) {
+  const reject = (): never => {
     throw new ApiError(
       0,
       `Refusing to send credentials to a non-API URL: ${path}. ` +
         'api.* takes a same-origin path such as "/v1/documents".'
     );
+  };
+
+  // Cheap shape check — necessary, but NOT the security boundary.
+  if (!path.startsWith('/')) reject();
+
+  // Refuse the divergent characters BEFORE parsing. This is deliberately not
+  // left to the origin comparison below: URL implementations differ in how
+  // faithfully they apply the stripping and backslash rules, and a lenient
+  // parser paired with a strict network stack is exactly how this class of
+  // bypass survives. Refusing outright is the same answer in every runtime.
+  if (hasUrlParserHazard(path)) reject();
+
+  // The boundary: resolve with the SAME parser `fetch` uses and compare
+  // origins, which closes the whole class rather than the spellings we happened
+  // to think of.
+  let resolved: URL;
+  try {
+    resolved = new URL(path, window.location.origin);
+  } catch {
+    return reject();
   }
+  if (resolved.origin !== window.location.origin) reject();
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

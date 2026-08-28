@@ -120,6 +120,46 @@ describe('Authorization header attachment', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('REFUSES paths that only LOOK same-origin to a string check', async () => {
+    // Parser differential: `fetch` resolves with the WHATWG URL parser, which
+    // strips ASCII tab/LF/CR before parsing and treats a backslash as "/" for
+    // special schemes. Each of these starts with a single "/" and so passes a
+    // `startsWith('//')` test, yet resolves to a foreign origin.
+    setAuthToken('token-abc');
+
+    // Built from code points so the hazardous characters are unambiguous in
+    // source and cannot be flattened by an editor or a copy/paste.
+    const TAB = String.fromCharCode(0x09);
+    const LF = String.fromCharCode(0x0a);
+    const CR = String.fromCharCode(0x0d);
+    const BACKSLASH = String.fromCharCode(0x5c);
+
+    const disguised = [
+      `/${TAB}/evil.example/steal`,
+      `/${LF}/evil.example/steal`,
+      `/${CR}/evil.example/steal`,
+      `/${BACKSLASH}evil.example/steal`,
+      `/${TAB}${BACKSLASH}evil.example/steal`,
+      `/v1/documents${CR}${LF}X-Injected: 1`,
+    ];
+
+    for (const path of disguised) {
+      await expect(api.get(path)).rejects.toThrow(/Refusing to send credentials/);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still allows ordinary same-origin API paths', async () => {
+    // A fresh Response per call: a body can only be read once, so a single
+    // shared instance fails the second request with "Body is unusable".
+    fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+
+    await expect(api.get('/v1/documents?limit=20')).resolves.toEqual({});
+    await expect(api.get('/v1/documents/abc/content')).resolves.toEqual({});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('RFC 7807 problem-details parsing', () => {
