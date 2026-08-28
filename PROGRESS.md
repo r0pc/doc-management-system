@@ -1,8 +1,8 @@
 # PROGRESS / HANDOFF REPORT
 
 **Run**: Secure Document Management System (Full-Stack Implementation).
-**Status**: **Wave 6 Complete** (React 18 Single-Page Application + GitHub Primer Design System + Dark/Light Theme Switching + Multi-Tenant Access Control).
-**Repo state at handoff**: clean tree, all commits pushed to `origin/main`, all verification gates green.
+**Status**: **Wave 7 Complete** (ingestion-path repair, ML inference wired end to end, pgvector arm activated, production startup gate, frontend coverage).
+**Repo state at handoff**: all Wave 7 work committed on branch `fix/production-readiness` (not yet pushed or merged); all verification gates green.
 
 ---
 
@@ -13,7 +13,7 @@ Full-stack build of the self-hosted DMS per `AGENTS.md` + `Docs/document-managem
 1. **No LLM layer** — ML failure/low-confidence routes directly to human review (`decided_by ∈ {rules, ml, human}`; `classification/llm/` deliberately never created).
 2. **Kaggle-hosted training prep** — `/ml` toolkit: synthetic corpus generator, hard-gated dataset exporter, calibrated trainer template, v1 artifact contract.
 3. **PII scope locked** to banking (account/card numbers) + personal (passport, CNIC) only — 4 recognizers registered.
-4. **Rules + ML are placeholders this phase** (real validators, stubbed scanners routing to review); parsing / DB / uploads / workers / auth / policy fully built.
+4. **Rules and ML are live** as of Wave 7 — all four recognisers scan for real, and the calibrated cascade runs (ML >= threshold, else human review). Note the model is evaluated on SYNTHETIC data only; see item 1 of section 6.
 5. **Full React 18 SPA (Wave 6)** — Modern, responsive, accessible interface with GitHub Primer design system, light/dark mode theme provider, multi-tenant dev switcher, and cosmetic UI gating.
 6. **Strict Security Invariants** — All 33 non-negotiable invariants in `AGENTS.md` treated as security controls.
 
@@ -31,20 +31,22 @@ Full-stack build of the self-hosted DMS per `AGENTS.md` + `Docs/document-managem
 | **5A** | End-to-End System Verification (`backend/tests/integration/test_e2e_upload_to_review.py` & `scripts/e2e.sh`): walks S0 (DB migration) → S1 (dev JWT minting) → S2 (presigned PUT + upload complete) → S3 (worker pipeline execution + review queue) → S4 (human review resolution + lowering under `check_monotonic` trigger + audit trail) → S5 (split content streaming with Range vs 303 redirect) → S6 (cross-tenant RFC 7807 404 byte-parity) → S7 (EICAR malware rejection against live ClamAV) | ✅ Complete |
 | **5B** | Documentation & Final QA: Root/backend/ml README sweep with complete 33 Invariant Enforcement Matrix, Deviations & Architectural Decisions Ledger, full gate execution (466 hermetic, 6 integration, 21 ML), reviewer gate pass | ✅ Complete |
 | **6** | Frontend Application: React 18 + TypeScript (strict) + Vite + Tailwind CSS + GitHub Primer Design System + TanStack Query & Table. Multi-tenant auth with Web Crypto HMAC-SHA256 signing, direct presigned PUT upload wizard (Invariant #1), keyset-paginated document library with split content delivery (Invariants #17, #18, #32), review queue with confidence indicators (Invariants #8, #12), hybrid search with pre-filtered facets (Invariants #27, #28, #29), immutable audit trail viewer (Invariants #24, #30), taxonomy administration CRUD, and cosmetic UI gating (<Can> / usePermissions, Invariant #33) | ✅ Complete |
+| **7** | **Production readiness.** Ingestion repair: content digest established in-pipeline by `_ensure_sha256` (every real upload had been failing at `extract` and landing in `status='failed'`; the hermetic suite missed it because its fixtures seeded a digest production never had). Migration `0005`: restored #8's monotonicity scope (0004's version-equality guard let automated writers lower labels) and backfilled `access_log.tenant_id` (0004's unbackfilled RLS had made all pre-upgrade audit history invisible). ML wired end to end: predicted `doc_type` now persists, the embed-stage vector is reused by classification (#6), prediction failures degrade to review instead of crashing ingestion, and the worker image ships the inference stack with encoder weights baked in offline. pgvector arm activated (#27/#29) with keyword-only degradation. Production startup gate in `validate_runtime`; `/v1/dev-storage` no longer mountable outside dev. Frontend coverage 12 → 70 tests, fixing an unclassified-as-Public badge (#9), two missed downgrade transitions, a fail-open auth path, and bearer-token leakage to absolute URLs | ✅ Complete |
 
 ---
 
 ## 3. Verification Gate Status at Handoff (All Self-Run, Verbatim Tails)
 
 ```
-Frontend typecheck         → tsc --noEmit: clean (strict mode, 0 errors)
-Frontend tests             → vitest run: 12 passed across 4 test suites
-Frontend production build  → vite build: dist/ generated in 4.91s (293 kB JS, 30 kB CSS)
-Backend hermetic tests     → pytest -q: 466 passed, 3 skipped, 7 deselected
-Backend integration tests  → pytest -m integration -v: 6 passed (real PG16 @55432 & ClamAV @3310)
-Backend typecheck          → mypy app: Success: no issues found in 61 source files (strict)
-Backend linting            → ruff check .: All checks passed!
-ML toolkit tests           → pytest tests -q (in ml/): 21 passed
+Frontend typecheck         -> tsc --noEmit: clean (strict mode, 0 errors)
+Frontend tests             -> vitest run: 70 passed across 7 test suites
+Frontend production build  -> vite build: dist/ generated (338 kB JS, 31 kB CSS)
+Backend hermetic tests     -> pytest -q: 527 passed, 3 skipped, 8 deselected
+Backend integration tests  -> pytest -m integration: 7 passed, 1 skipped (real PG16 @55432 & ClamAV @3310)
+Backend typecheck          -> mypy app: Success: no issues found in 62 source files (strict)
+Backend linting            -> ruff check .: All checks passed!
+Backend formatting         -> ruff format --check .: 132 files already formatted
+ML toolkit tests           -> pytest tests -q (in ml/): 21 passed
 Docker compose stack       → postgres (55432), redis (6379), clamav (3310), minio (9000/9001) all healthy
 ```
 
@@ -62,7 +64,7 @@ Docker compose stack       → postgres (55432), redis (6379), clamav (3310), mi
 - **Labels & Badges**: GitHub-style pill badges for Public (Green), Internal (Blue), Confidential (Amber), and Restricted (Red).
 
 ### Security & Invariant Enforcement
-- **Native Web Crypto Token Signing**: `auth.tsx` mints real HS256 tokens using the browser's `crypto.subtle` API, ensuring backend `DevJWTVerifier` accepts requests without 500/401 errors.
+- **Backend-minted dev tokens**: `auth.tsx` POSTs to `/v1/dev/token`, so no signing secret ever reaches the browser. The endpoint is mounted only when the API runs with `env=dev`, and the persona switcher is stripped from production builds.
 - **Direct Presigned PUT**: `UploadPage.tsx` transfers bytes directly to object storage via presigned URLs with progress bar tracking (Invariant #1).
 - **Split Content Delivery**: `DocumentDrawer.tsx` streams high-clearance bytes directly through the API with Range headers and uses presigned 303 redirects for lower-clearance files (Invariant #17 & #18).
 - **Audit-Preserved Lowering**: Reclassification modals enforce human justifications and respect the database-level `check_monotonic` trigger (Invariant #8).
@@ -87,9 +89,13 @@ Docker compose stack       → postgres (55432), redis (6379), clamav (3310), mi
 
 ## 6. What Remains Overall (Phase-2 Backlog)
 
-1. **Production ML Model Deployment**: Train calibrated classifier weights on Kaggle and deploy artifacts into `/backend/artifacts/`.
-2. **OCR Worker Pool**: Implement real Tesseract OCR on the dedicated `ocr` Celery queue.
+1. **Evaluate the classifier on REAL data — blocking for any production claim.** `backend/var/models/metrics.json` reports 1.0 recall on every class for both heads with `"real": null`. The corpus is generated by deterministic templates in `ml/templates.py`, so the model is near-certainly separating template fingerprints rather than document semantics, and invariant #14's "per-class recall near 1.0 on the highest label" is satisfied vacuously. The `0.85` cascade threshold is a default, not a measured operating point; it is exposed as `ML_CONFIDENCE_THRESHOLD` so it can be recalibrated against a real hold-out. Until that exists, treat every ML decision as provisional.
+2. **OCR Worker Pool**: Implement real Tesseract OCR on the dedicated `ocr` Celery queue. `app/extraction/ocr.py` still raises `NotImplementedError` and routes to the `ocr` queue.
 3. **SSE Real-Time Feed**: Implement Server-Sent Events for `/v1/events` to replace frontend query polling.
+4. **Search snippets**: `_load_snippet_text` still returns `{}`, so every result ships an empty snippet. `document_text` stores `tsvector` only; a raw-text store is needed (deviation #4).
+5. **Readiness probe**: `/healthz` is static. A production deployment wants a readiness check that verifies PostgreSQL, Redis, and ClamAV reachability.
+6. **Secrets**: the `docmgmt_app` role password is still a literal in migration `0002` and in `docker-compose.yml`. Move it to injected configuration before any real deployment.
+7. **Container inference is unexercised locally**: torch is not installed in the host venv, so the `.[ml]` code paths are covered by fakes only. The first real `docker compose build` needs a manual smoke test of a document reaching `decided_by='ml'`.
 
 ---
 
@@ -99,13 +105,13 @@ Docker compose stack       → postgres (55432), redis (6379), clamav (3310), mi
 # Frontend
 cd frontend
 npm run typecheck                                     # strict TypeScript validation
-npm run test                                          # Vitest unit test suite (12 passed)
+npm run test                                          # Vitest unit test suite (70 passed)
 npm run build                                         # Vite production bundling (dist/)
 npm run dev                                           # Vite dev server
 
 # Backend
 cd backend
-.venv/Scripts/python.exe -m pytest -q                 # Unit suite (hermetic, 466 passed)
+.venv/Scripts/python.exe -m pytest -q                 # Unit suite (hermetic, 527 passed)
 .venv/Scripts/python.exe -m pytest -m integration -v  # Integration suite (PG16 @55432 & ClamAV @3310)
 .venv/Scripts/python.exe -m mypy app                  # Strict mypy typecheck (0 issues)
 .venv/Scripts/python.exe -m ruff check .              # Ruff linter (0 errors)

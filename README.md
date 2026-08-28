@@ -30,8 +30,8 @@ uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 | Worker (OCR queue) | `celery -A app.workers.celery_app worker -Q ocr -l info --pool=solo` |
 | Migrations | `alembic upgrade head` |
 | Backend unit tests | `pytest -q` |
-| Integration tests | `pytest -m integration -v` |
 | Lint / format | `ruff check . && ruff format --check .` |
+| Integration tests (from host) | `CLAMAV_HOST=localhost pytest -m integration -v` |
 | Strict typecheck | `mypy app` |
 | ML toolkit tests | `cd ml && pytest tests -q` |
 | End-to-end verification | `bash scripts/e2e.sh` |
@@ -47,7 +47,7 @@ uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 - **Extraction Pipeline**: MIME sniffing via `puremagic` (extensions ignored), structural parsing (PyMuPDF, `python-docx`, `openpyxl`), and OCR routing.
 - **Classification Engine**: Structural PII recognizers with Luhn / CNIC / IBAN validation and ±50 char context window scoring, calibrated scikit-learn ML cascade (`CalibratedClassifierCV`), and human review queue routing.
 - **Workers & Tasks**: Celery on Redis with strict queue separation (`default` vs `ocr`), transactional stage journaling (`processing_jobs`), and real-time ClamAV INSTREAM socket scanning.
-- **Search**: Hybrid search with visibility predicates embedded *inside* both keyword and vector arms prior to Reciprocal Rank Fusion ($k=60$).
+- **Search**: Hybrid search with visibility predicates embedded *inside* both keyword (`ts_rank`) and vector (pgvector cosine) arms prior to Reciprocal Rank Fusion ($k=60$). With no encoder available the vector arm yields zero rows and search degrades to keyword-only.
 
 ---
 
@@ -60,15 +60,15 @@ uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 | **#3** | Fixed pipeline order (`scan → extract → keywords → embed → classify → index`) | `app/workers/tasks.py:process_upload_chain` defines the Celery canvas chain in exact sequence. |
 | **#4** | `processing_jobs` state journal around every stage; SQL-visible document status on failure | `app/workers/jobs.py:StageJournal` records before/after state transitions; failure triggers `mark_document_failed`. |
 | **#5** | sha256 idempotency | Pipeline keyed on sha256; `_already_succeeded` checks state journal; `record_classification` SELECTs before INSERT. |
-| **#6** | Single extraction & embedding pass reused by classification and search | `derived/{sha}/text.json` written once by `extract_text`; downstream stages read cached derived JSON. |
+| **#6** | Single extraction & embedding pass reused by classification and search | `derived/{sha}/text.json` written once by `extract_text`; the embed stage stores its vector in that same artifact and `classify` reuses it via `predict_type(embedding=...)` rather than re-encoding. |
 | **#7** | Identity validated against cached JWKS, no per-request IdP round-trips | `app/security/auth.py:OidcJwksVerifier` uses cached `PyJWKClient` with algorithm confusion defenses (`HS*` rejected in prod). |
-| **#8** | `check_monotonic` trigger: automated cannot lower, human lowering audited | `alembic/versions/0002_security_hardening.py` (`trg_check_monotonic`); human overrides audited in `access_log`. |
+| **#8** | `check_monotonic` trigger: automated cannot lower, human lowering audited | `alembic/versions/0005_monotonic_audit_backfill.py` is the current trigger: any `decided_by <> 'human'` write below the document's CURRENT classification rank is refused, at any version. Human overrides audited in `access_log`. |
 | **#9** | Nothing matched defaults to `Internal` floor, never `Public` | `app/domain/policy.py:aggregate_level` and SQL coalesce enforce `DEFAULT_FLOOR_RANK = 2` (`Internal`). |
 | **#10** | Recogniser is pattern + structural validator + context words (±50 chars) | `app/classification/rules/recognizers.py`, `app/classification/rules/base.py` & `score_with_context` window helper. |
-| **#11** | Calibrated ML probabilities; cascade thresholds (ML ≥ 0.85, else review) | `app/classification/ml/loader.py` enforces `CalibratedClassifierCV` artifact contract v1; `classify` routes to review. |
+| **#11** | Calibrated ML probabilities; cascade thresholds (ML ≥ threshold, else review) | `app/classification/ml/loader.py` enforces `CalibratedClassifierCV` artifact contract v1 and degrades every prediction failure to review; threshold is `ML_CONFIDENCE_THRESHOLD` (default 0.85). **Caveat: the shipped model has no real-data evaluation — see PROGRESS.md §6.1.** |
 | **#12** | `findings` stores character offsets only, never matched sensitive text | `Finding` model, DB schema, and API wire models carry `(char_start, char_end, page_no, score)` only. |
 | **#13** | Never train on held-out evaluation set | `ml/export_training_data.py` & `ml/train_classifier.py` enforce strict train/val/eval segregation. |
-| **#14** | Per-class recall on highest security label tracked near 1.0 | `ml/artifact_contract.md` specifies per-class evaluation requirements. |
+| **#14** | Per-class recall on highest security label tracked near 1.0 | `ml/artifact_contract.md` specifies per-class evaluation requirements; `load_artifact` warns when a manifest carries no real-slice metrics. **Currently satisfied on SYNTHETIC data only (`"real": null`), which makes it vacuous — see PROGRESS.md §6.1.** |
 | **#15** | Object key is never an authorization boundary; permissions on `documents` row | `blobs` table carries no tenant/permission columns; authorization resolved exclusively via `DocumentView`. |
 | **#16** | Primary bucket objects immutable; edits are new blobs + versions | `app/storage/base.py:PrimaryBlobGuard` mixin rejects deletes/overwrites (`ImmutableKeyError`, `BlobExistsError`). |
 | **#17** | Content split: Confidential/Restricted stream through API with Range; Public/Internal redirect to ≤120s presign | `app/api/v1/documents.py:get_document_content` streams bytes with HTTP 206 support for high clearance; redirects (303) for low clearance. |
@@ -83,7 +83,7 @@ uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 | **#26** | Tenant scoping enforced by Row-Level Security | Migration `0002_security_hardening.py` enables and forces RLS via `app.tenant_id` session GUC. |
 | **#27** | Permission filter inside both keyword and vector search subqueries pre-ranking | `app/search/hybrid.py:build_visible_candidates` embeds access filter in both search arms prior to ranking. |
 | **#28** | Snippets and facet counts derive from already-filtered candidate set | `app/search/hybrid.py` groups facets and extracts snippets only over the pre-filtered candidate subquery. |
-| **#29** | Fusion is Reciprocal Rank Fusion ($k=60$) | `app/search/hybrid.py:rrf_merge` implements pure RRF with default constant $k=60$. |
+| **#29** | Fusion is Reciprocal Rank Fusion ($k=60$) | `app/search/hybrid.py:rrf_merge` implements pure RRF with default constant $k=60$. The pgvector arm is live (`compose_vector_subquery`); only ranks are fused — cosine distance is never compared against `ts_rank`. |
 | **#30** | Audit writes happen in same transaction as action | `app/api/deps.py:record_audit` executed and committed within the active `AsyncSession` across all mutation endpoints. |
 | **#31** | Cross-tenant 404 indistinguishable in body and timing; RFC 7807 problem JSON | `app/api/v1/errors.py:not_found()` returns uniform RFC 7807 response for nonexistent, foreign tenant, and denied rows. |
 | **#32** | Cursor pagination only; no `OFFSET` | Keyset pagination `(created_at, id)` implemented across listing endpoints (`documents`, `review`, `audit`). |
@@ -96,6 +96,8 @@ uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 1. **LLM Tail Layer Omission**: In accordance with the phase requirements, the self-hosted LLM layer was omitted (`classification/llm/` deliberately not created). Any classification ambiguity or low ML confidence (< 0.85) routes directly to the human review queue (`decided_by ∈ {rules, ml, human}`).
 2. **Real-time Events (`/v1/events`)**: Returns `501 Not Implemented` placeholder; full Server-Sent Events (SSE) stream deferred to Phase 2.
 3. **Fail-Closed ClamAV Dev Gate**: `SCAN_ENABLED` may be toggled to `false` in `env="dev"` for hermetic unit testing, but `Settings.validate_runtime` strictly blocks startup if `env="prod"` and `scan_enabled=false`.
-4. **Search Snippet Representation**: `document_text` stores PostgreSQL `tsvector` representations rather than plaintext to maintain zero plaintext persistence in secondary tables. Keyword headline extraction in search responses utilizes tsvector representation; raw text snippet store is slated for Phase 2.
+4. **Search Snippet Representation**: `document_text` stores PostgreSQL `tsvector` representations rather than plaintext to maintain zero plaintext persistence in secondary tables. `_load_snippet_text` therefore returns `{}` and **every search result currently ships an empty snippet**; a raw-text snippet store is Phase 2.
 5. **Search Keyset Pagination**: Keyset cursor pagination is deferred for the search endpoint because Reciprocal Rank Fusion scores across dynamic query terms do not provide monotonic tie-breakers without materializing candidate windows.
-6. **PyMuPDF Dual Licensing**: PyMuPDF (AGPL / commercial dual-license) is isolated strictly behind `app/extraction/registry.py` and `app/extraction/pdf.py` for straightforward future substitution if needed.
+6. **ML Artifact Distribution**: the trained classifier (`model.joblib`) is gitignored and is NOT baked into the image; compose mounts `backend/var/models` read-only and points `MODEL_ARTIFACT_PATH` at it. An absent artifact is a normal state — the loader returns `None` and every document routes to human review. The *encoder* weights (`BAAI/bge-small-en-v1.5`) ARE baked in at build time, with `HF_HUB_OFFLINE=1` at runtime so a missing cache is a hard error rather than silent egress to huggingface.co (self-hosting invariant).
+
+7. **PyMuPDF Dual Licensing**: PyMuPDF (AGPL / commercial dual-license) is isolated strictly behind `app/extraction/registry.py` and `app/extraction/pdf.py` for straightforward future substitution if needed.
