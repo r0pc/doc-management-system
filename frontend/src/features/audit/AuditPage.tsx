@@ -121,9 +121,14 @@ export const AuditPage: React.FC = () => {
       <ProblemAlert error={error} />
 
       {/* Audit Log Table */}
+      {/*
+        Do not claim the trail is empty when the request failed. A viewer
+        without VIEW_AUDIT gets a 403 here, and "No audit entries recorded"
+        would read as "nothing has happened" rather than "you were denied".
+      */}
       {isLoading ? (
         <TableSkeleton rows={8} cols={5} />
-      ) : logs.length === 0 ? (
+      ) : error ? null : logs.length === 0 ? (
         <EmptyState
           icon={<History className="w-8 h-8 text-[#656d76] dark:text-[#848d97]" />}
           title="No audit entries recorded"

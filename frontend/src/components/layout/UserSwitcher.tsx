@@ -3,15 +3,49 @@ import { useAuth, DEV_PERSONAS } from '../../api/auth';
 import { UserCheck, Shield, ChevronDown } from 'lucide-react';
 
 export const UserSwitcher: React.FC = () => {
-  const { currentPersona, loginWithPersona } = useAuth();
+  const { currentPersona, loginWithPersona, devPersonasEnabled } = useAuth();
   const [open, setOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  // Escape closes the menu and returns focus to the trigger, so the control is
+  // operable and escapable without a pointer.
+  React.useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>('button');
+    first?.focus();
+  }, [open]);
+
+  // Belt and braces with Navbar's gate: this component must not render itself
+  // if the shim is disabled, whatever mounts it.
+  if (!devPersonasEnabled) return null;
 
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#f6f8fa] dark:bg-[#21262d] hover:bg-[#eaeef2] dark:hover:bg-[#30363d] text-left transition-colors border border-[#d0d7de] dark:border-[#30363d] text-xs shadow-2xs"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={
+          currentPersona
+            ? `Switch dev persona. Current: ${currentPersona.label}, clearance ${currentPersona.clearance}`
+            : 'Select a dev persona'
+        }
+        className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#f6f8fa] dark:bg-[#21262d] hover:bg-[#eaeef2] dark:hover:bg-[#30363d] text-left transition-colors border border-[#d0d7de] dark:border-[#30363d] text-xs shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0969da]"
       >
         <div className="w-5 h-5 rounded-full bg-[#0969da] dark:bg-[#2f81f7] text-white flex items-center justify-center font-bold text-[10px]">
           {currentPersona?.label[0] || 'U'}
@@ -34,7 +68,12 @@ export const UserSwitcher: React.FC = () => {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <div className="absolute right-0 mt-1.5 w-72 rounded-md bg-white dark:bg-[#161b22] shadow-xl border border-[#d0d7de] dark:border-[#30363d] py-1.5 z-50 animate-in fade-in duration-100">
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label="Dev personas"
+            className="absolute right-0 mt-1.5 w-72 rounded-md bg-white dark:bg-[#161b22] shadow-xl border border-[#d0d7de] dark:border-[#30363d] py-1.5 z-50 animate-in fade-in duration-100"
+          >
             <div className="px-3 py-1 text-[11px] font-semibold text-[#656d76] dark:text-[#848d97] uppercase tracking-wider border-b border-[#d0d7de] dark:border-[#30363d] pb-1.5 mb-1">
               Switch Persona (Dev Shim)
             </div>
@@ -45,11 +84,14 @@ export const UserSwitcher: React.FC = () => {
                   <button
                     key={p.id}
                     type="button"
+                    role="menuitemradio"
+                    aria-checked={isCurrent}
                     onClick={() => {
-                      loginWithPersona(p);
+                      void loginWithPersona(p);
                       setOpen(false);
+                      triggerRef.current?.focus();
                     }}
-                    className={`w-full px-3 py-2 text-left flex items-start gap-2.5 hover:bg-[#f6f8fa] dark:hover:bg-[#21262d] transition-colors ${
+                    className={`w-full px-3 py-2 text-left flex items-start gap-2.5 hover:bg-[#f6f8fa] dark:hover:bg-[#21262d] transition-colors focus-visible:outline-none focus-visible:bg-[#eaeef2] dark:focus-visible:bg-[#30363d] ${
                       isCurrent ? 'bg-[#ddf4ff]/50 dark:bg-[#388bfd]/15' : ''
                     }`}
                   >

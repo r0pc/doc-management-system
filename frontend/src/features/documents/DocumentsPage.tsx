@@ -144,9 +144,10 @@ export const DocumentsPage: React.FC = () => {
       <ProblemAlert error={error} />
 
       {/* Table */}
+      {/* A failed request is not an empty repository — see ProblemAlert above. */}
       {isLoading ? (
         <TableSkeleton rows={6} cols={6} />
-      ) : documents.length === 0 ? (
+      ) : error ? null : documents.length === 0 ? (
         <EmptyState
           title="No documents found"
           description={

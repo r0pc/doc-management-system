@@ -12,19 +12,78 @@ export class ApiError extends Error {
   }
 }
 
+export const AUTH_TOKEN_STORAGE_KEY = 'dms_auth_token';
+
+/**
+ * Auth-token storage trade-off — read before changing this.
+ *
+ * The bearer token lives in `localStorage`. That is a deliberate, and imperfect,
+ * choice for this deployment:
+ *
+ *  - COST: `localStorage` is readable by any JavaScript running on this origin.
+ *    A single XSS — an injected script, a compromised npm dependency, a
+ *    third-party widget — exfiltrates the token, and with it the user's full
+ *    clearance for the token's lifetime (the dev shim mints 7-day tokens). An
+ *    `HttpOnly; Secure; SameSite` cookie is the only storage the page's own
+ *    JavaScript cannot read, and is therefore strictly safer against XSS.
+ *  - BENEFIT: it is the only option that works with the current design, where
+ *    the token is attached as an `Authorization: Bearer` header from fetch and
+ *    the API is a separate origin behind a proxy. Cookie auth would require the
+ *    backend to set the cookie, CSRF protection on every mutating route, and a
+ *    same-site deployment — i.e. an auth re-architecture, not a frontend change.
+ *  - CONSEQUENCE: the client-side token is NOT a security boundary. Every
+ *    request is authorized server-side against the token's verified claims; a
+ *    stolen token is contained by its TTL and by the audit trail, not by
+ *    anything this file does.
+ *
+ * If this system moves to production auth (Keycloak/OIDC per AGENTS.md), move
+ * the session to an HttpOnly cookie or a BFF and delete these helpers. Until
+ * then, keep the token out of logs, URLs, and error payloads.
+ *
+ * Storage access is wrapped because it throws outright in Safari private mode
+ * and when a browser is configured to block site data.
+ */
 export function getAuthToken(): string | null {
-  return localStorage.getItem('dms_auth_token');
+  try {
+    return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function setAuthToken(token: string | null) {
-  if (token) {
-    localStorage.setItem('dms_auth_token', token);
-  } else {
-    localStorage.removeItem('dms_auth_token');
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Storage unavailable (private mode / blocked site data). The token stays
+    // in memory for this page only; the user re-authenticates on reload.
+  }
+}
+
+/**
+ * Every call through `request()` attaches the bearer token, so the target must
+ * be the API origin and nothing else. Absolute URLs are refused outright: a
+ * presigned storage URL, or any attacker-influenced host, must never receive an
+ * `Authorization` header. Direct-to-storage traffic goes through `putDirect`,
+ * which never sends credentials (invariant #1).
+ */
+function assertApiPath(path: string): void {
+  if (!path.startsWith('/') || path.startsWith('//')) {
+    throw new ApiError(
+      0,
+      `Refusing to send credentials to a non-API URL: ${path}. ` +
+        'api.* takes a same-origin path such as "/v1/documents".'
+    );
   }
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  assertApiPath(path);
+
   const token = getAuthToken();
   const headers = new Headers(options.headers || {});
 
@@ -36,8 +95,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  const url = path.startsWith('http') ? path : `${path}`;
-  const response = await fetch(url, {
+  const response = await fetch(path, {
     ...options,
     headers,
   });
@@ -57,11 +115,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(response.status, message, problem);
   }
 
-  if (response.status === 204) {
+  // 204/205 carry no body by definition; a 200 with an empty body (some
+  // proxies rewrite 204s) would otherwise blow up in `response.json()` with an
+  // opaque SyntaxError instead of a usable result.
+  if (response.status === 204 || response.status === 205) {
     return {} as T;
   }
 
-  return response.json();
+  const text = await response.text();
+  if (text === '') {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(
+      response.status,
+      `Expected JSON from ${path} but the response body was not valid JSON.`
+    );
+  }
 }
 
 export const api = {
@@ -82,7 +155,7 @@ export const api = {
     return request<T>(url, { method: 'GET' });
   },
 
-  post: <T>(path: string, body?: any) => {
+  post: <T>(path: string, body?: unknown) => {
     return request<T>(path, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
@@ -103,6 +176,11 @@ export const api = {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', url, true);
+      // Invariant #1: the bytes go browser -> object storage. No Authorization
+      // header and no cookies are attached here — the presigned URL IS the
+      // credential, and adding a second one would leak the session to the
+      // storage host and break the signature on strict S3 implementations.
+      xhr.withCredentials = false;
       xhr.setRequestHeader('Content-Type', contentType);
 
       if (xhr.upload && onProgress) {
@@ -130,8 +208,25 @@ export const api = {
     });
   },
 
-  // Fetch document content supporting range streaming & redirect detection (Invariant #17)
-  fetchDocumentContent: async (documentId: string): Promise<{ blob: Blob; filename: string }> => {
+  /**
+   * Single entry point for document bytes (invariants #17 / #18).
+   *
+   * There is exactly ONE URL: the API's own `/v1/documents/{id}/content`. The
+   * SERVER, not this client, decides the delivery mode from the document's
+   * level — Confidential/Restricted stream through the API (one audit row per
+   * response, range headers honoured), Public/Internal get a 303 to a
+   * short-TTL presigned URL. The frontend never constructs, guesses, or
+   * caches a storage URL, and never picks the "cheap" path for a restricted
+   * document: it cannot, because it only knows one endpoint.
+   *
+   * On the 303 hop the browser drops the `Authorization` header (it is a
+   * cross-origin redirect), so the bearer token is never presented to the
+   * object store. `redirected` is returned so callers can *report* which path
+   * the server chose; it is telemetry, never an authorization decision.
+   */
+  fetchDocumentContent: async (
+    documentId: string
+  ): Promise<{ blob: Blob; filename: string; redirected: boolean }> => {
     const token = getAuthToken();
     const headers: Record<string, string> = {};
     if (token) {
@@ -141,13 +236,20 @@ export const api = {
     const response = await fetch(`/v1/documents/${documentId}/content`, {
       method: 'GET',
       headers,
+      redirect: 'follow',
     });
 
     if (!response.ok) {
       let problem: ProblemDetails | undefined;
       try {
-        problem = await response.json();
-      } catch {}
+        const data = await response.json();
+        if (data && typeof data === 'object') {
+          problem = data as ProblemDetails;
+        }
+      } catch {
+        // Non-JSON error body (proxy HTML, empty 502). Fall through to the
+        // status-only message rather than masking the failure.
+      }
       throw new ApiError(
         response.status,
         problem?.detail || problem?.title || `Failed to download (${response.status})`,
@@ -155,16 +257,50 @@ export const api = {
       );
     }
 
-    const disposition = response.headers.get('Content-Disposition');
-    let filename = `document-${documentId}`;
-    if (disposition && disposition.includes('filename=')) {
-      const match = disposition.match(/filename=["']?([^"';]+)["']?/);
-      if (match && match[1]) {
-        filename = match[1];
-      }
-    }
-
     const blob = await response.blob();
-    return { blob, filename };
+    return {
+      blob,
+      filename: parseContentDispositionFilename(
+        response.headers.get('Content-Disposition'),
+        `document-${documentId}`
+      ),
+      redirected: response.redirected === true,
+    };
   },
 };
+
+/**
+ * The API pins `response-content-disposition` on presigned URLs, so this is the
+ * server's filename, not user input from the current page. It is still treated
+ * as untrusted: path separators are stripped so a crafted header can never
+ * steer the browser's save target out of the download directory.
+ */
+export function parseContentDispositionFilename(
+  disposition: string | null,
+  fallback: string
+): string {
+  if (!disposition) return fallback;
+
+  // RFC 5987 `filename*=UTF-8''...` wins over the plain form when both exist.
+  const extended = disposition.match(/filename\*=(?:UTF-8|utf-8)''([^;]+)/);
+  if (extended?.[1]) {
+    try {
+      const decoded = sanitizeFilename(decodeURIComponent(extended[1]));
+      if (decoded) return decoded;
+    } catch {
+      // Malformed percent-encoding — fall through to the plain form.
+    }
+  }
+
+  const plain = disposition.match(/filename=["']?([^"';]+)["']?/);
+  if (plain?.[1]) {
+    const cleaned = sanitizeFilename(plain[1]);
+    if (cleaned) return cleaned;
+  }
+
+  return fallback;
+}
+
+function sanitizeFilename(name: string): string {
+  return name.trim().replace(/[\\/]/g, '_').replace(/^\.+/, '');
+}

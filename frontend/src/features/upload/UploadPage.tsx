@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
@@ -21,7 +21,18 @@ export const UploadPage: React.FC = () => {
   const [departmentId, setDepartmentId] = useState(currentPersona?.departmentId || '');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState<'idle' | 'intent' | 'uploading' | 'completing' | 'done'>('idle');
-  const [error, setError] = useState<any>(null);
+  const [error, setError] = useState<unknown>(null);
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the post-success redirect timer on unmount. Without this, navigating
+  // away during the 1.2s success pause fired `navigate()` against an unmounted
+  // router.
+  React.useEffect(
+    () => () => {
+      if (redirectTimer.current !== null) clearTimeout(redirectTimer.current);
+    },
+    []
+  );
 
   // Sync default department when persona switches
   React.useEffect(() => {
@@ -57,20 +68,32 @@ export const UploadPage: React.FC = () => {
       setError(null);
       setUploadStage('intent');
 
+      // The declared content type must be IDENTICAL in the intent and in the
+      // PUT: S3/MinIO signs the Content-Type into the presigned URL, so a
+      // mismatch is a signature failure (403), not a metadata nit. Previously
+      // the intent said 'application/pdf' and the PUT said
+      // 'application/octet-stream' whenever the browser could not sniff a type.
+      // The server sniffs the real type on ingest regardless (invariant #19) —
+      // this value is a transport declaration, not a trusted classification.
+      const contentType = file.type || 'application/octet-stream';
+
       // Step 1: Request Upload Intent (Invariant #1)
       const intent = await api.post<UploadIntentResponse>('/v1/uploads', {
         filename: title || file.name,
         size_bytes: file.size,
-        content_type: file.type || 'application/pdf',
+        content_type: contentType,
       });
 
-      // Step 2: Direct browser PUT to presigned quarantine URL (Invariant #1)
+      if (!intent?.presigned_put?.url) {
+        throw new Error('Upload intent did not return a presigned URL; refusing to send bytes.');
+      }
+
+      // Step 2: Direct browser PUT to presigned quarantine URL (Invariant #1).
+      // The file body goes browser -> storage. It never passes through `api.post`
+      // and never reaches the API origin.
       setUploadStage('uploading');
-      await api.putDirect(
-        intent.presigned_put.url,
-        file,
-        file.type || 'application/octet-stream',
-        (percent) => setUploadProgress(percent)
+      await api.putDirect(intent.presigned_put.url, file, contentType, (percent) =>
+        setUploadProgress(percent)
       );
 
       // Step 3: Complete upload and enqueue processing chain
@@ -83,11 +106,12 @@ export const UploadPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       queryClient.invalidateQueries({ queryKey: ['review'] });
 
-      setTimeout(() => {
+      redirectTimer.current = setTimeout(() => {
         navigate('/documents');
       }, 1200);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setUploadStage('idle');
+      setUploadProgress(0);
       setError(err);
     }
   };
@@ -111,10 +135,14 @@ export const UploadPage: React.FC = () => {
         <CardContent>
           <form onSubmit={handleUpload} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
+              <label
+                htmlFor="upload-title"
+                className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1"
+              >
                 Document Title
               </label>
               <Input
+                id="upload-title"
                 type="text"
                 placeholder="e.g. Master Services Agreement 2026"
                 value={title}
@@ -124,10 +152,14 @@ export const UploadPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
+              <label
+                htmlFor="upload-department"
+                className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1"
+              >
                 Target Department UUID
               </label>
               <Input
+                id="upload-department"
                 type="text"
                 value={departmentId}
                 onChange={(e) => setDepartmentId(e.target.value)}
@@ -140,7 +172,10 @@ export const UploadPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
+              <label
+                htmlFor="upload-file"
+                className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1"
+              >
                 Document File (.pdf, .docx, .xlsx)
               </label>
               <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-[#d0d7de] dark:border-[#30363d] border-dashed rounded-md hover:border-[#0969da] dark:hover:border-[#2f81f7] transition-colors bg-[#f6f8fa] dark:bg-[#161b22]">
@@ -150,6 +185,7 @@ export const UploadPage: React.FC = () => {
                     <label className="relative cursor-pointer bg-white dark:bg-[#21262d] rounded font-semibold text-[#0969da] dark:text-[#2f81f7] hover:underline focus-within:outline-none px-2 py-0.5 border border-[#d0d7de] dark:border-[#30363d] shadow-2xs">
                       <span>Choose file</span>
                       <input
+                        id="upload-file"
                         type="file"
                         className="sr-only"
                         accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -188,7 +224,14 @@ export const UploadPage: React.FC = () => {
                   </span>
                   <span className="font-mono">{uploadProgress}%</span>
                 </div>
-                <div className="w-full bg-[#eaeef2] dark:bg-[#21262d] rounded-full h-1.5 overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-label="Upload progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={uploadStage === 'done' ? 100 : uploadProgress}
+                  className="w-full bg-[#eaeef2] dark:bg-[#21262d] rounded-full h-1.5 overflow-hidden"
+                >
                   <div
                     className={`h-1.5 rounded-full transition-all duration-200 ${
                       uploadStage === 'done' ? 'bg-[#1a7f37] dark:bg-[#3fb950]' : 'bg-[#0969da] dark:bg-[#2f81f7]'

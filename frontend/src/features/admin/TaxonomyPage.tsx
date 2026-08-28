@@ -16,14 +16,22 @@ export const TaxonomyPage: React.FC = () => {
 
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypeDesc, setNewTypeDesc] = useState('');
-  const [error, setError] = useState<any>(null);
+  const [mutationError, setMutationError] = useState<unknown>(null);
 
-  const { data: levels, isLoading: levelsLoading } = useQuery({
+  const {
+    data: levels,
+    isLoading: levelsLoading,
+    error: levelsError,
+  } = useQuery({
     queryKey: ['security-levels'],
     queryFn: () => api.get<SecurityLevelOut[]>('/v1/admin/security-levels'),
   });
 
-  const { data: docTypes, isLoading: docTypesLoading } = useQuery({
+  const {
+    data: docTypes,
+    isLoading: docTypesLoading,
+    error: docTypesError,
+  } = useQuery({
     queryKey: ['doc-types'],
     queryFn: () => api.get<DocTypeOut[]>('/v1/admin/doc-types'),
   });
@@ -38,17 +46,18 @@ export const TaxonomyPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['doc-types'] });
       setNewTypeName('');
       setNewTypeDesc('');
-      setError(null);
+      setMutationError(null);
     },
-    onError: (err) => setError(err),
+    onError: (err) => setMutationError(err),
   });
 
   const deleteDocTypeMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/v1/admin/doc-types/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['doc-types'] });
+      setMutationError(null);
     },
-    onError: (err) => setError(err),
+    onError: (err) => setMutationError(err),
   });
 
   const handleCreateType = (e: React.FormEvent) => {
@@ -70,7 +79,15 @@ export const TaxonomyPage: React.FC = () => {
         </p>
       </div>
 
-      <ProblemAlert error={error} />
+      {/*
+        Query failures were previously swallowed entirely: only mutation errors
+        reached the UI, so a non-admin hitting 403 on GET /v1/admin/doc-types
+        saw "No custom document types configured yet" — a denial rendered as an
+        empty taxonomy.
+      */}
+      <ProblemAlert error={mutationError} />
+      <ProblemAlert error={levelsError} />
+      <ProblemAlert error={docTypesError} />
 
       {/* 1. Security Levels Table */}
       <Card>
@@ -86,7 +103,7 @@ export const TaxonomyPage: React.FC = () => {
         <CardContent>
           {levelsLoading ? (
             <TableSkeleton rows={4} cols={4} />
-          ) : (
+          ) : levelsError ? null : (
             <div className="bg-white dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] overflow-hidden">
               <Table>
                 <TableHeader>
@@ -142,6 +159,7 @@ export const TaxonomyPage: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <Input
                 type="text"
+                aria-label="Document type name"
                 placeholder="Type Name (e.g. Vendor MSA)"
                 value={newTypeName}
                 onChange={(e) => setNewTypeName(e.target.value)}
@@ -149,6 +167,7 @@ export const TaxonomyPage: React.FC = () => {
               />
               <Input
                 type="text"
+                aria-label="Document type description"
                 placeholder="Description / Category"
                 value={newTypeDesc}
                 onChange={(e) => setNewTypeDesc(e.target.value)}
@@ -170,7 +189,7 @@ export const TaxonomyPage: React.FC = () => {
           {/* Types List Table */}
           {docTypesLoading ? (
             <TableSkeleton rows={4} cols={4} />
-          ) : (
+          ) : docTypesError ? null : (
             <div className="bg-white dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] overflow-hidden">
               <Table>
                 <TableHeader>
@@ -194,6 +213,7 @@ export const TaxonomyPage: React.FC = () => {
                           <Button
                             variant="destructive"
                             size="sm"
+                            aria-label={`Delete document type ${dt.name}`}
                             onClick={() => deleteDocTypeMutation.mutate(dt.id)}
                             disabled={deleteDocTypeMutation.isPending}
                             className="h-6 px-2 text-[10px]"
@@ -206,7 +226,7 @@ export const TaxonomyPage: React.FC = () => {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-6 text-xs text-[#656d76] dark:text-[#848d97]">
+                      <TableCell colSpan={3} className="text-center py-6 text-xs text-[#656d76] dark:text-[#848d97]">
                         No custom document types configured yet.
                       </TableCell>
                     </TableRow>

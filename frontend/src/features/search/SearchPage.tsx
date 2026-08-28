@@ -166,9 +166,15 @@ export const SearchPage: React.FC = () => {
 
           {/* Results List */}
           <div className="md:col-span-3 space-y-2.5">
+            {/*
+              An API failure is NOT an empty result: saying "no documents match
+              within your clearance" when the request was actually denied or
+              broken is the most misleading thing a permission-scoped list can
+              say. ProblemAlert above owns the error.
+            */}
             {isLoading ? (
               <LoadingSkeleton count={4} />
-            ) : searchData?.results && searchData.results.length > 0 ? (
+            ) : error ? null : searchData?.results && searchData.results.length > 0 ? (
               searchData.results.map((item) => (
                 <Card
                   key={item.document_id}

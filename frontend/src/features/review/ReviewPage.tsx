@@ -115,9 +115,10 @@ export const ReviewPage: React.FC = () => {
       <ProblemAlert error={error} />
 
       {/* Queue Table */}
+      {/* A failed request is not a clean queue — see ProblemAlert above. */}
       {isLoading ? (
         <TableSkeleton rows={5} cols={6} />
-      ) : items.length === 0 ? (
+      ) : error ? null : items.length === 0 ? (
         <EmptyState
           icon={<CheckSquare className="w-8 h-8 text-[#1a7f37] dark:text-[#3fb950]" />}
           title="Review queue is clean"

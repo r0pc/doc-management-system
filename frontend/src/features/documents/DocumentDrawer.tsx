@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api, getAuthToken } from '../../api/client';
+import { api } from '../../api/client';
 import { DocumentListItem, JobOut, FindingOut } from '../../api/types';
 import { LevelBadge } from '../../components/common/LevelBadge';
 import { Button } from '../../components/ui/button';
@@ -16,6 +16,7 @@ import {
   History,
   Sparkles,
 } from 'lucide-react';
+import { trapFocus } from '../../lib/focus-trap';
 import { Can } from '../../security/Can';
 import { Action } from '../../security/permissions';
 
@@ -31,30 +32,32 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
   onReclassify,
 }) => {
   const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<any>(null);
+  const [downloadError, setDownloadError] = useState<unknown>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!documentId) return;
 
-    const activeElement = document.activeElement as HTMLElement;
-    
+    const activeElement = document.activeElement as HTMLElement | null;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
 
     document.addEventListener('keydown', handleKeyDown);
     document.body.style.overflow = 'hidden';
-    
-    // Focus first focusable element
-    setTimeout(() => {
-      closeButtonRef.current?.focus();
-    }, 50);
+
+    // Focus synchronously rather than on a 50ms timer, which could fire after
+    // the drawer had already unmounted and stole focus back from the page.
+    closeButtonRef.current?.focus();
+
+    const releaseFocus = panelRef.current ? trapFocus(panelRef.current) : () => {};
 
     return () => {
+      releaseFocus();
       document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = '';
-      // Restore focus
       activeElement?.focus();
     };
   }, [documentId, onClose]);
@@ -77,46 +80,42 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     enabled: !!documentId,
   });
 
+  /**
+   * Download (invariants #17 / #18).
+   *
+   * There is ONE request, to the API's own content endpoint, whatever the
+   * document's level. The server chooses the delivery mode from the level it
+   * has on record: Confidential/Restricted stream back through the API with an
+   * audit row per response; Public/Internal come back as a 303 to a short-TTL
+   * presigned URL that the browser follows (dropping the Authorization header
+   * on the cross-origin hop).
+   *
+   * This used to be two branches selected from `doc.level` as rendered in this
+   * drawer — a client-side guess at a server-side decision, on data that can be
+   * stale by the time the button is clicked. The label below still *reports*
+   * the expected mode, but nothing here can route a Restricted document down
+   * the presigned path: the frontend has no storage URL to route it to.
+   */
   const handleDownload = async () => {
     if (!doc) return;
     try {
       setDownloading(true);
       setDownloadError(null);
 
-      const levelName = doc.level ? doc.level.toLowerCase() : 'internal';
-      const isHighClearance = ['confidential', 'restricted'].includes(levelName);
+      const { blob, filename } = await api.fetchDocumentContent(doc.id);
 
-      if (isHighClearance) {
-        // Streamed directly through API (Invariant #17)
-        const { blob, filename } = await api.fetchDocumentContent(doc.id);
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename || doc.filename || 'document';
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        // Presigned redirect path
-        const res = await fetch(`/v1/documents/${doc.id}/content`, {
-          headers: {
-            Authorization: `Bearer ${getAuthToken() || ''}`,
-          },
-          redirect: 'follow',
-        });
-        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = doc.filename || 'document';
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      }
-    } catch (err: any) {
+      const url = window.URL.createObjectURL(blob);
+      const a = window.document.createElement('a');
+      a.href = url;
+      a.download = filename || doc.filename || 'document';
+      a.rel = 'noopener';
+      window.document.body.appendChild(a);
+      a.click();
+      window.document.body.removeChild(a);
+      // Revoking synchronously after click() races the browser's read of the
+      // blob in some engines; defer to the next task.
+      setTimeout(() => window.URL.revokeObjectURL(url), 0);
+    } catch (err: unknown) {
       setDownloadError(err);
     } finally {
       setDownloading(false);
@@ -134,7 +133,10 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     >
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
       <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
-        <div className="w-screen max-w-xl bg-white dark:bg-[#161b22] border-l border-[#d0d7de] dark:border-[#30363d] shadow-2xl flex flex-col transition-colors">
+        <div
+          ref={panelRef}
+          className="w-screen max-w-xl bg-white dark:bg-[#161b22] border-l border-[#d0d7de] dark:border-[#30363d] shadow-2xl flex flex-col transition-colors"
+        >
           {/* Header */}
           <div className="p-4 sm:p-5 border-b border-[#d0d7de] dark:border-[#30363d] flex items-center justify-between bg-[#f6f8fa] dark:bg-[#161b22]">
             <div className="flex items-center gap-2">
@@ -145,10 +147,13 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
             </div>
             <button
               ref={closeButtonRef}
+              type="button"
               onClick={onClose}
-              className="p-1 rounded-sm text-[#656d76] dark:text-[#848d97] hover:text-[#1f2328] dark:hover:text-[#e6edf3] hover:bg-[#eaeef2] dark:hover:bg-[#30363d]"
+              aria-label="Close document inspector"
+              className="p-1 rounded-sm text-[#656d76] dark:text-[#848d97] hover:text-[#1f2328] dark:hover:text-[#e6edf3] hover:bg-[#eaeef2] dark:hover:bg-[#30363d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0969da]"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4" aria-hidden="true" />
+              <span className="sr-only">Close</span>
             </button>
           </div>
 
@@ -288,10 +293,21 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
           {/* Footer Actions */}
           {doc && (
             <div className="p-4 border-t border-[#d0d7de] dark:border-[#30363d] bg-[#f6f8fa] dark:bg-[#161b22] flex items-center justify-between gap-3">
-              <span className="text-[11px] text-[#656d76] dark:text-[#848d97]">
+              {/*
+                Informational only: the SERVER picks the delivery mode from the
+                level it holds (#17). This label reports the expected mode from
+                the level shown in this drawer; it selects nothing.
+              */}
+              <span className="text-[11px] text-[#656d76] dark:text-[#848d97]" data-testid="delivery-mode">
                 Delivery: {['confidential', 'restricted'].includes(doc.level ? doc.level.toLowerCase() : '') ? 'API Stream (Range)' : 'Presigned 303'}
               </span>
               <div className="flex items-center gap-2">
+                {/*
+                  Gated on DOWNLOAD, never on PREVIEW: they are separate
+                  permissions (#18), and a preview-only user must not be shown a
+                  control that fetches the bytes. This is chrome — the API
+                  re-authorizes the DOWNLOAD action on every content request.
+                */}
                 <Can action={Action.DOWNLOAD} document={doc}>
                   <Button
                     size="sm"
