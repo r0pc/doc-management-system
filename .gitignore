@@ -222,3 +222,6 @@ backend/storage-data/
 .omo/
 node_modules/
 frontend/dist/
+
+ml/corpus/
+dataset.csv
