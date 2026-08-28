@@ -96,6 +96,7 @@ def test_unknown_mime_maps_to_422(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.extraction.sniff import UnknownMimeError
+
     async def raiser(
         session: Any,
         *,

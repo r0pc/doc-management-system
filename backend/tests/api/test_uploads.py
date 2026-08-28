@@ -194,9 +194,6 @@ def test_complete_happy_path(
     assert journal[-1]["session"] is SENTINEL_SESSION
 
 
-
-
-
 def test_enqueue_receives_document_and_version(
     client_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -213,9 +210,6 @@ def test_enqueue_receives_document_and_version(
     assert response.status_code == 200
     document_id = str(captured["document_id"])
     assert calls == [(document_id, str(VERSION_ID))]
-
-
-
 
 
 def test_broker_down_returns_503_but_state_committed(

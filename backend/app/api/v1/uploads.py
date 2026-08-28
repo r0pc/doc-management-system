@@ -26,6 +26,8 @@ cap, completion re-verifies actual bytes against it (413 on mismatch) and
 against the cap regardless.
 """
 
+from __future__ import annotations
+
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -258,9 +260,7 @@ async def complete_upload(
             raise HTTPException(HTTP_409_CONFLICT, "document is not quarantined")
 
         actor_id = await _provision_actor(session, user)
-        version_id = await _persist_version(
-            session, document_id=doc.id, actor_id=actor_id
-        )
+        version_id = await _persist_version(session, document_id=doc.id, actor_id=actor_id)
         await deps.record_audit(
             session,
             tenant_id=user.tenant_id,
