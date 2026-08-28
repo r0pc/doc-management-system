@@ -4,6 +4,8 @@
 thinner than the threshold is routed to the dedicated ocr queue.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Final
 
 from app.extraction.base import (

@@ -12,6 +12,8 @@ TODO(env-config-phase2): host/port live as module constants because
 config wave reopens (alongside a storage-root field).
 """
 
+from __future__ import annotations
+
 import socket
 import struct
 from dataclasses import dataclass

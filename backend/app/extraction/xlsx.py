@@ -4,6 +4,8 @@ An empty workbook is not an OCR case — it yields an empty ExtractedDocument
 (char_count 0) and the pipeline decides what to do with it.
 """
 
+from __future__ import annotations
+
 import io
 
 from app.extraction.base import ExtractedDocument, PageText, ParserUnavailable

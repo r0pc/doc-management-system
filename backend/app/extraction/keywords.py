@@ -5,6 +5,8 @@ consumers may rely on; output is fully deterministic (sorted by score desc,
 then term asc) so identical text yields byte-identical terms (#6).
 """
 
+from __future__ import annotations
+
 import re
 from collections import Counter
 from typing import Final

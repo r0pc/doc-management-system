@@ -27,6 +27,8 @@ review items and writes the audit row — all in ONE transaction. The DB
 human-decided lowering that workers can never perform (#8).
 """
 
+from __future__ import annotations
+
 import base64
 import re
 import uuid
@@ -571,9 +573,6 @@ async def get_document_content(
         )
         await session.commit()
         return RedirectResponse(url, status_code=303)
-
-
-
 
 
 @router.get("/{document_id}/findings", response_model=list[FindingOut])

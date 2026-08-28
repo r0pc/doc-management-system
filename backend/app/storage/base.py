@@ -5,6 +5,8 @@ blob plus a new ``document_versions`` row. Both backends enforce this through
 :class:`PrimaryBlobGuard` so the semantics cannot drift between local and MinIO.
 """
 
+from __future__ import annotations
+
 import tempfile
 from typing import BinaryIO, Final, Protocol
 

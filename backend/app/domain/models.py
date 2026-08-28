@@ -5,6 +5,8 @@ must stay free of any framework import (no web, no ORM, no I/O) so the
 authorisation suite can run as a parametrised table with no fixtures.
 """
 
+from __future__ import annotations
+
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass

@@ -5,6 +5,8 @@ and the workers. Handlers receive bytes only — invariant #19 forbids filename
 parameters anywhere in this package.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Protocol
 

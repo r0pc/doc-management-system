@@ -11,6 +11,8 @@ the contract the frontend codes against. Polling alternative:
 ``GET /v1/documents/{id}/jobs``.
 """
 
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 

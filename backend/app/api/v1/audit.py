@@ -17,6 +17,8 @@ tiebreaker; the limit CLAMPS to the ceiling rather than rejecting so audit
 consumers never 400 on an oversized page request.
 """
 
+from __future__ import annotations
+
 import base64
 import uuid
 from dataclasses import dataclass

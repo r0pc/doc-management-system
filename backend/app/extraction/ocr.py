@@ -4,6 +4,8 @@ This module only detects *whether* a job needs OCR (scanned PDF probe) so
 workers can route to the dedicated ocr queue without invoking a handler.
 """
 
+from __future__ import annotations
+
 from app.extraction.base import ExtractedDocument
 from app.extraction.pdf import has_text_layer
 

@@ -4,6 +4,8 @@ A docx has no physical pages, so the whole document is reported as a single
 pseudo-page numbered 1 (``PageText.page_no`` stays strictly ``int``).
 """
 
+from __future__ import annotations
+
 import io
 
 from app.extraction.base import ExtractedDocument, PageText, ParserUnavailable

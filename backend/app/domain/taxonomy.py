@@ -5,6 +5,8 @@ no randomness — so both the API and the classification workers aggregate
 labels identically.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final

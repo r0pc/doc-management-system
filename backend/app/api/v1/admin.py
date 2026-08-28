@@ -17,6 +17,8 @@ Create/delete write their audit rows in the SAME transaction as the change
 spec §6), so no visibility axes apply here — only the MANAGE_TAXONOMY gate.
 """
 
+from __future__ import annotations
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response

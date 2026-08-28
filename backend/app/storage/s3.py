@@ -5,6 +5,8 @@ lets tests substitute a dict-backed fake. Only ``ClientError`` is imported from
 botocore, for 404 detection in the immutability pre-check (#16).
 """
 
+from __future__ import annotations
+
 from typing import BinaryIO, Final, Protocol, TypedDict
 
 # botocore ships no py.typed/stubs and pyproject edits are out of scope this

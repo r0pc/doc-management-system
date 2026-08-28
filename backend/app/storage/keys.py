@@ -7,6 +7,8 @@ produced by ``hashlib.hexdigest()`` — so identical content always maps to an
 identical key (dedup precondition for invariant #16 / idempotency #5).
 """
 
+from __future__ import annotations
+
 import re
 import uuid
 from typing import Final, Literal

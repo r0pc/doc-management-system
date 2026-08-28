@@ -6,6 +6,8 @@ acceptable. The scoring helper below is real now so the phase-2 scanners and
 their tests pin identical semantics (spec §3.2).
 """
 
+from __future__ import annotations
+
 import re
 from abc import ABC, abstractmethod
 from typing import ClassVar, Final

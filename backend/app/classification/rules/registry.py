@@ -4,6 +4,8 @@ The scope is user-locked â€” bank_account, card_number, passport_number, cnic â€
 and nothing else registers until the rules wave reopens it.
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from typing import Final
 

@@ -6,6 +6,8 @@ docx, xlsx and plain archives return the same ambiguous candidate list — so
 zip payloads are disambiguated by inspecting archive members instead.
 """
 
+from __future__ import annotations
+
 import io
 import zipfile
 from typing import Final

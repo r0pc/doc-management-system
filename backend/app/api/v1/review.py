@@ -20,6 +20,8 @@ the monotonicity authority and admits the human lowering workers can never
 make (#8); prior classification rows are never touched.
 """
 
+from __future__ import annotations
+
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime

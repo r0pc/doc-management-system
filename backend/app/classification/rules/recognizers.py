@@ -5,6 +5,8 @@ not re-derived. Validators and patterns are production-ready now; every scan()
 body is a placeholder until the rules wave (user-locked scope, four types).
 """
 
+from __future__ import annotations
+
 import re
 from typing import ClassVar, Final
 

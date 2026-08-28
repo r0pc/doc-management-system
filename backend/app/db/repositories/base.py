@@ -6,6 +6,8 @@ to ``db/`` per the project layout rules - repositories are the translation
 seam, which keeps policy code pure and free of session/ORM concerns.
 """
 
+from __future__ import annotations
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 

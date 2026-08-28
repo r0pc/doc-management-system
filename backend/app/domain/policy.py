@@ -6,6 +6,8 @@ pure: no session, no request object, no I/O — so the suite runs as a
 parametrised table with no fixtures.
 """
 
+from __future__ import annotations
+
 from collections.abc import Sequence
 
 from app.domain.models import (

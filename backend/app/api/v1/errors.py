@@ -16,6 +16,8 @@ The fallback 500 handler is deliberately sanitised: it never echoes exception
 text, which may contain storage keys or SQL fragments.
 """
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from typing import cast
 

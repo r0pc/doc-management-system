@@ -5,6 +5,8 @@ signature at all; :class:`UnsupportedMimeError` means the type was identified
 but no handler exists for it this phase (pdf/docx/xlsx only).
 """
 
+from __future__ import annotations
+
 from app.extraction.base import ExtractedDocument, ExtractionHandler
 from app.extraction.docx import DocxHandler
 from app.extraction.pdf import PdfHandler

@@ -5,6 +5,8 @@ are cosmetic). Preview and download are deliberately distinct actions: seeing
 a document on screen never implies the right to a copyable original.
 """
 
+from __future__ import annotations
+
 from typing import Final
 
 from app.domain.models import Action

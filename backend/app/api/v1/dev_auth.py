@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 from typing import Any
 
@@ -10,6 +12,7 @@ from app.config import Settings
 
 router = APIRouter(tags=["dev-auth"])
 
+
 class Persona(BaseModel):
     """Request body for dev token minting — camelCase from the frontend."""
 
@@ -21,6 +24,7 @@ class Persona(BaseModel):
     clearance: int
     tenant_id: str = pydantic.Field(alias="tenantId")
     department_id: str = pydantic.Field(alias="departmentId")
+
 
 @router.post("/dev/token")
 def mint_dev_token(persona: Persona) -> dict[str, str]:

@@ -8,6 +8,8 @@ The dev shim is hard-gated to ``env="dev"`` so it can never be constructed in
 a production process, even by accident.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID

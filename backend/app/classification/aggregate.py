@@ -7,6 +7,8 @@ is the thin construction of Findings — character offsets, never matched text
 (#12) — and their summarisation.
 """
 
+from __future__ import annotations
+
 from collections.abc import Sequence
 from typing import Final
 

@@ -5,6 +5,8 @@ a dev-only verification endpoint — **never deploy this backend in production**
 nothing server-side enforces these signatures here, MinIO/S3 replaces it.
 """
 
+from __future__ import annotations
+
 import hashlib
 import hmac
 import io

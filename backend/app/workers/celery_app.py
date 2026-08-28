@@ -4,6 +4,8 @@ The OCR queue must stay separate from `default` (AGENTS.md invariant): a
 multi-minute OCR job on a shared pool starves every other pipeline stage.
 """
 
+from __future__ import annotations
+
 from celery import Celery
 
 from app.config import Settings
