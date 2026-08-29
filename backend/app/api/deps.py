@@ -67,7 +67,11 @@ TenantSessionOpener = Callable[[uuid.UUID], AbstractAsyncContextManager[AsyncSes
 def get_verifier() -> TokenVerifier:
     """Process-wide token verifier chosen once from settings."""
     settings = Settings()
-    if settings.env == "dev" and settings.oidc_issuer is None:
+    # Falsy, not `is None`: an unset issuer can arrive as None or as "" from a
+    # blank .env line, and treating "" as configured builds a JWKS client with
+    # no scheme — a 500 on every authenticated request. Settings normalises
+    # blanks to None; this stays defensive because the failure is silent.
+    if settings.env == "dev" and not settings.oidc_issuer:
         return DevJWTVerifier(settings.dev_jwt_secret, env="dev")
     issuer = settings.oidc_issuer or ""
     jwks_url = f"{issuer.rstrip('/')}/protocol/openid-connect/certs"

@@ -22,6 +22,13 @@ uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 directory you launch from — `app/config.py` anchors the lookup on its own
 location, not the process CWD. A `backend/.env`, if present, overrides it.
 
+**On Windows, `--reload` is not optional.** psycopg's async mode cannot run on
+`ProactorEventLoop`, and uvicorn selects a compatible loop only when
+`use_subprocess` is set (`--reload`, or `--workers > 1`). Without it the server
+starts and then fails every database request. Startup now refuses outright with
+that explanation rather than degrading to a 500 per request. Linux, macOS and
+the Docker images are unaffected.
+
 **If the API refuses to start**, read the error: `ENV` defaults to `prod`, and a
 production process must prove it was configured (see the Production block in
 `.env.example`). Without a root `.env` there is nothing to set `ENV=dev`, so

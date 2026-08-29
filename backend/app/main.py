@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -24,6 +26,36 @@ from app.api.v1.errors import register_error_handlers
 from app.config import Settings, validate_runtime
 
 
+def _assert_psycopg_compatible_loop() -> None:
+    """Refuse to serve on an event loop psycopg's async mode cannot use.
+
+    On Windows, ``asyncio``'s default is ``ProactorEventLoop`` and psycopg
+    raises ``InterfaceError`` on every connection attempt. The server itself
+    starts fine, so the symptom is a 500 on every database-backed request with
+    the real cause buried in a traceback — a startup refusal with an
+    actionable message is strictly better.
+
+    Setting the event-loop POLICY does not help: uvicorn >= 0.36 passes an
+    explicit ``loop_factory`` and picks ProactorEventLoop on Windows unless
+    ``use_subprocess`` is set (``--reload`` or ``--workers > 1``), which is why
+    the documented ``--reload`` workflow works and a bare invocation does not.
+    Nothing importable can override that from here, so this checks and reports
+    rather than pretending to fix it.
+    """
+    if sys.platform != "win32":
+        return
+    loop_name = type(asyncio.get_running_loop()).__name__
+    if "Proactor" not in loop_name:
+        return
+    msg = (
+        f"psycopg's async mode cannot run on {loop_name}, so every database "
+        "request would fail. On Windows, start the API with --reload (which "
+        "makes uvicorn select an event loop psycopg supports), or run the "
+        "stack under docker compose."
+    )
+    raise RuntimeError(msg)
+
+
 def _under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ
 
@@ -33,6 +65,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup validation is skipped under pytest so unit tests stay hermetic."""
     if not _under_pytest():
         validate_runtime(Settings())
+        _assert_psycopg_compatible_loop()
     yield
 
 

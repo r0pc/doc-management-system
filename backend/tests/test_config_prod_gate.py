@@ -40,6 +40,49 @@ class TestEnvFileDiscovery:
         assert Settings.model_config["env_file"] is None
 
 
+class TestBlankOidcIsUnset:
+    """A blank `.env` line means unset, and must select the dev shim.
+
+    `.env.example` ships `OIDC_ISSUER=` to show the key exists. dotenv reports
+    that as "", not None, so an `is None` check treated a blank as a configured
+    issuer, skipped the dev JWT verifier, and constructed a JWKS client from an
+    empty string. That failed only once a request arrived — a 500 on every
+    authenticated endpoint, with a traceback instead of a config error.
+    """
+
+    def test_blank_string_normalises_to_none(self) -> None:
+        settings = Settings(env="dev", dev_jwt_secret="s3cret-for-tests", oidc_issuer="")  # noqa: S106
+        assert settings.oidc_issuer is None
+
+    def test_whitespace_only_normalises_to_none(self) -> None:
+        settings = Settings(env="dev", dev_jwt_secret="s3cret-for-tests", oidc_audience="   ")  # noqa: S106
+        assert settings.oidc_audience is None
+
+    def test_a_real_issuer_survives(self) -> None:
+        settings = Settings(env="dev", dev_jwt_secret="s3cret", oidc_issuer="https://idp/realm")  # noqa: S106
+        assert settings.oidc_issuer == "https://idp/realm"
+
+    def test_dev_with_blank_issuer_selects_the_dev_shim(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The end-to-end symptom: this is what returned 500 on every request."""
+        from app.api.deps import get_verifier
+        from app.security.auth import DevJWTVerifier
+
+        monkeypatch.setenv("ENV", "dev")
+        monkeypatch.setenv("DEV_JWT_SECRET", "a-dev-secret-value")
+        monkeypatch.setenv("OIDC_ISSUER", "")
+        get_verifier.cache_clear()
+        try:
+            assert isinstance(get_verifier(), DevJWTVerifier)
+        finally:
+            get_verifier.cache_clear()
+
+    def test_prod_rejects_a_schemeless_issuer(self) -> None:
+        with pytest.raises(RuntimeError, match="absolute http"):
+            validate_runtime(prod_settings(oidc_issuer="idp.internal/realms/docmgmt"))
+
+
 PROD_READY = {
     "env": "prod",
     "scan_enabled": True,

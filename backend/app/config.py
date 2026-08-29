@@ -77,6 +77,21 @@ class Settings(BaseSettings):
             )
         return self
 
+    @field_validator("oidc_issuer", "oidc_audience", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        """A blank .env line means "unset"; dotenv reports it as "", not None.
+
+        `.env.example` ships `OIDC_ISSUER=` to show the key exists. Without this
+        normalisation an `is None` check downstream reads that blank as a
+        configured issuer, skips the dev JWT shim, and builds a JWKS client from
+        an empty string — surfacing as a 500 on every authenticated request
+        rather than as a configuration error. One shape for every consumer.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("presign_ttl_seconds")
     @classmethod
     def _clamp_presign_ttl(cls, value: int) -> int:
@@ -119,6 +134,10 @@ def _prod_violations(settings: Settings) -> list[str]:
     # no verifier to build, and the dev HS256 shim must never be reachable.
     if not settings.oidc_issuer:
         problems.append("OIDC_ISSUER is required (the dev JWT shim is forbidden in prod)")
+    elif not settings.oidc_issuer.startswith(("https://", "http://")):
+        # PyJWKClient rejects a schemeless URI, but only when the first request
+        # arrives — a 500 per request instead of a refusal to start.
+        problems.append("OIDC_ISSUER must be an absolute http(s) URL")
     if settings.dev_jwt_secret:
         problems.append("DEV_JWT_SECRET must be unset in prod")
     if settings.minio_secret_key in _COMPOSE_DEFAULT_SECRETS:
