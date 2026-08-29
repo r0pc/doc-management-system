@@ -6,16 +6,40 @@ Self-hosting invariant: no hosted/cloud service endpoints exist here by design.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Final, Literal, Self
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_BACKEND_DIR: Final[Path] = Path(__file__).resolve().parents[1]
+_REPO_ROOT: Final[Path] = _BACKEND_DIR.parent
+
+# Anchored on this file's location, never the process CWD. A bare ".env" is
+# resolved relative to wherever the process was launched, and the documented
+# workflow puts .env at the repo root while running the API from backend/ —
+# so the file was silently never read and EVERY setting fell back to its
+# default, including env="prod". A missing config file must not be able to
+# masquerade as a production deployment.
+#
+# Later entries win, so a backend-local .env still overrides the shared one.
+_ENV_FILES: Final[tuple[Path, ...]] = (_REPO_ROOT / ".env", _BACKEND_DIR / ".env")
+
+# Hermetic tests: a developer's .env must never decide whether the suite
+# passes. Checked via sys.modules rather than PYTEST_CURRENT_TEST because
+# model_config is evaluated at import time, before any test starts.
+_UNDER_PYTEST: Final[bool] = "pytest" in sys.modules
+
 
 class Settings(BaseSettings):
     """Runtime configuration. Frozen after construction."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=None if _UNDER_PYTEST else _ENV_FILES,
+        env_prefix="",
+        extra="ignore",
+    )
 
     env: Literal["dev", "prod"] = "prod"
     database_url: str = "postgresql+psycopg://docmgmt:docmgmt@localhost:55432/docmgmt"

@@ -7,7 +7,38 @@ security invariant if it drifts, so the gate refuses the process instead.
 
 import pytest
 
-from app.config import Settings, validate_runtime
+from app.config import _BACKEND_DIR, _ENV_FILES, _REPO_ROOT, Settings, validate_runtime
+
+
+class TestEnvFileDiscovery:
+    """Config discovery must not depend on where the process was launched.
+
+    A bare ``env_file=".env"`` resolves against the CWD. The documented
+    workflow keeps .env at the repo root and starts the API from backend/, so
+    the file was never read and every setting silently fell back to its
+    default — including ``env="prod"``, which then tripped the production gate
+    on a developer machine. A missing config file must not be able to
+    masquerade as a production deployment.
+    """
+
+    def test_env_files_are_absolute(self) -> None:
+        assert all(path.is_absolute() for path in _ENV_FILES)
+
+    def test_repo_root_is_located_correctly(self) -> None:
+        # Anchored, not guessed: these two files pin the layout the paths assume.
+        assert (_REPO_ROOT / ".env.example").is_file()
+        assert (_BACKEND_DIR / "pyproject.toml").is_file()
+
+    def test_root_env_is_searched_and_backend_env_wins(self) -> None:
+        assert _ENV_FILES[0] == _REPO_ROOT / ".env"
+        # Later entries take priority in pydantic-settings, so a backend-local
+        # override must come last.
+        assert _ENV_FILES[-1] == _BACKEND_DIR / ".env"
+
+    def test_suite_never_reads_a_developer_env_file(self) -> None:
+        """Whether this suite passes must not depend on whose machine ran it."""
+        assert Settings.model_config["env_file"] is None
+
 
 PROD_READY = {
     "env": "prod",

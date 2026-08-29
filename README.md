@@ -9,7 +9,7 @@ Design authority: `Docs/document-management-system-spec.pdf`. Agent instructions
 ## Quickstart
 
 ```bash
-cp .env.example .env          # dev-safe defaults; never commit .env
+cp .env.example .env          # REQUIRED, at the repo root; dev-safe defaults, never commit it
 docker compose up -d          # postgres (55432), redis (6379), clamav (3310), minio (9000/9001)
 cd backend
 python -m venv .venv && source .venv/Scripts/activate   # Windows git-bash
@@ -17,6 +17,16 @@ pip install ".[parsers,dev]"
 alembic upgrade head          # apply core schema, monotonic trigger, RLS, taxonomy seed
 uvicorn app.main:app --reload # start dev API on 127.0.0.1:8000
 ```
+
+`.env` lives at the **repo root** and is found from there no matter which
+directory you launch from — `app/config.py` anchors the lookup on its own
+location, not the process CWD. A `backend/.env`, if present, overrides it.
+
+**If the API refuses to start**, read the error: `ENV` defaults to `prod`, and a
+production process must prove it was configured (see the Production block in
+`.env.example`). Without a root `.env` there is nothing to set `ENV=dev`, so
+startup is refused by design rather than silently running a dev-shaped process
+under production defaults.
 
 ---
 
