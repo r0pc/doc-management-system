@@ -23,9 +23,10 @@ import base64
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_400_BAD_REQUEST
@@ -51,6 +52,21 @@ class AuditLogEntry(BaseModel):
     ip: str | None
     user_agent: str | None
     ts: datetime
+
+    @field_validator("ip", mode="before")
+    @classmethod
+    def _stringify_ip(cls, value: object) -> object:
+        """``access_log.ip`` is a Postgres ``inet``; psycopg3 hands back an
+        ``ipaddress`` object, not a string.
+
+        Coerced here rather than widening the annotation so the wire contract
+        stays a plain JSON string. Without this the endpoint 500s on any row
+        carrying a real client address — which is every row in a real
+        deployment, and why an empty audit table made this look healthy.
+        """
+        if isinstance(value, IPv4Address | IPv6Address | IPv4Network | IPv6Network):
+            return str(value)
+        return value
 
 
 class AuditPage(BaseModel):

@@ -28,6 +28,7 @@ against the cap regardless.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -50,6 +51,8 @@ from app.domain.models import DEFAULT_FLOOR_RANK, Action, DocumentRef, UserCtx
 from app.domain.policy import can_access
 from app.storage.base import Storage, clamp_presign_ttl
 from app.storage.keys import quarantine_key
+
+logger = logging.getLogger(__name__)
 
 # allow: SIZE_OK - single upload resource surface (2 endpoints + ingest
 # helpers); the file whitelist for this wave forbids new modules. The
@@ -275,6 +278,17 @@ async def complete_upload(
         _enqueue_chain(doc.id, version_id)
     except Exception as exc:
         # Documented decision: committed 'processing' + 503; reconciler recovers.
+        # The client is told nothing beyond "unavailable" (the broker topology is
+        # not theirs to see), so the cause has to reach the operator here or it
+        # reaches nobody — a 503 with no log line is undiagnosable.
+        from app.workers.celery_app import celery_app
+
+        logger.exception(
+            "enqueue_failed document_id=%s version_id=%s broker=%s",
+            doc.id,
+            version_id,
+            celery_app.conf.broker_url,
+        )
         raise HTTPException(
             HTTP_503_SERVICE_UNAVAILABLE, "processing pipeline unavailable"
         ) from exc

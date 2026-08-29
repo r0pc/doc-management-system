@@ -43,6 +43,9 @@ class Settings(BaseSettings):
 
     env: Literal["dev", "prod"] = "prod"
     database_url: str = "postgresql+psycopg://docmgmt:docmgmt@localhost:55432/docmgmt"
+    # Alembic runs as the schema owner; the app runs as docmgmt_app. Unset
+    # falls back to database_url (single-role setups).
+    migration_database_url: str | None = None
     redis_url: str = "redis://localhost:6379/0"
 
     storage_backend: Literal["local", "minio"] = "local"
@@ -97,6 +100,22 @@ class Settings(BaseSettings):
     def _clamp_presign_ttl(cls, value: int) -> int:
         """Presigned URLs must stay within the 60-120s policy window."""
         return max(60, min(120, value))
+
+    @property
+    def sync_migration_db_url(self) -> str:
+        """URL Alembic runs as: the schema OWNER, never the application role.
+
+        ``docmgmt_app`` deliberately holds no DDL rights and no privileges on
+        ``alembic_version`` — migration 0002 revokes them and RLS is applied
+        *to* that role (#24, #26) — so running migrations as ``DATABASE_URL``
+        fails with "permission denied for table alembic_version".
+        docker-compose already splits these (``migrate`` uses POSTGRES_USER,
+        the app services use docmgmt_app); this makes the same split
+        expressible on a host checkout. Falls back to ``database_url`` so a
+        single-role setup keeps working.
+        """
+        url = self.migration_database_url or self.database_url
+        return url.replace("+asyncpg", "+psycopg")
 
     @property
     def sync_db_url(self) -> str:

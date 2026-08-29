@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 from collections.abc import AsyncIterator
@@ -56,6 +57,27 @@ def _assert_psycopg_compatible_loop() -> None:
     raise RuntimeError(msg)
 
 
+def _configure_app_logging() -> None:
+    """Give application loggers somewhere to go.
+
+    uvicorn installs handlers on its own ``uvicorn.*`` loggers and leaves the
+    root logger bare, so every ``logging.getLogger(__name__)`` call in this
+    package resolved to a logger with no handler. Anything below WARNING was
+    dropped outright and warnings fell through to ``logging.lastResort`` with
+    no timestamp or logger name — which is how a 503 with a deliberate
+    ``logger.exception`` next to it can still produce an empty log.
+
+    Only applied when nothing else has configured the root logger, so a real
+    deployment's logging config (or pytest's caplog) still wins.
+    """
+    if logging.getLogger().handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
+
+
 def _under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ
 
@@ -79,6 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     Defaults to reading the environment, which is what uvicorn does.
     """
     settings = settings if settings is not None else Settings()
+    _configure_app_logging()
     app = FastAPI(title="Secure Document Management System", lifespan=_lifespan)
 
     app.add_middleware(

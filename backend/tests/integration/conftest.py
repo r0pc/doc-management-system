@@ -8,6 +8,8 @@ sidecar on another port). Throwaway databases are created per session and
 dropped afterwards - nothing outside them is touched.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import secrets

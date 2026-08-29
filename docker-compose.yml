@@ -92,6 +92,11 @@ services:
     command: ["alembic", "upgrade", "head"]
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
+      # Must be set HERE, not left to .env: that file is written for host-side
+      # tooling and points at 127.0.0.1:55432, which inside this container is
+      # the container itself. `environment` overrides `env_file`, so pinning it
+      # keeps the host's loopback URL from leaking into the compose network.
+      MIGRATION_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
     env_file:
       - path: .env
         required: false
@@ -140,7 +145,15 @@ services:
       - storage-data:/srv/app/var/storage
       - ./backend/var/models:/srv/app/var/models:ro
     environment:
-      DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
+      # Workers run cross-tenant by nature: the pipeline is handed a
+      # document id and must load it before it can know whose it is. They
+      # bind no app.tenant_id GUC, so under docmgmt_app the FORCE ROW LEVEL
+      # SECURITY policies (#26) hide every row and load_version_context
+      # raises NoResultFound on the first stage. The API keeps the
+      # restricted role because it binds a tenant per request.
+      # FOLLOW-UP: thread tenant_id through the task payload and bind it in
+      # the worker session so RLS covers this path too, instead of exempting it.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
       SCAN_ENABLED: "true"
@@ -173,7 +186,15 @@ services:
       - storage-data:/srv/app/var/storage
       - ./backend/var/models:/srv/app/var/models:ro
     environment:
-      DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
+      # Workers run cross-tenant by nature: the pipeline is handed a
+      # document id and must load it before it can know whose it is. They
+      # bind no app.tenant_id GUC, so under docmgmt_app the FORCE ROW LEVEL
+      # SECURITY policies (#26) hide every row and load_version_context
+      # raises NoResultFound on the first stage. The API keeps the
+      # restricted role because it binds a tenant per request.
+      # FOLLOW-UP: thread tenant_id through the task payload and bind it in
+      # the worker session so RLS covers this path too, instead of exempting it.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
       SCAN_ENABLED: "true"

@@ -31,7 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, TypedDict, TypeVar
 
-from celery import chain, shared_task
+from celery import chain
 from celery.exceptions import Ignore
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -47,6 +47,7 @@ from app.extraction.registry import extract_document
 from app.storage.base import BlobExistsError, Storage
 from app.storage.keys import bucket_name, derived_key, primary_key, quarantine_key
 from app.storage.local import LocalStorage
+from app.workers.celery_app import celery_app
 from app.workers.jobs import (
     ProcessingJobsJournal,
     get_sync_sessions,
@@ -82,7 +83,19 @@ class RegisteredTask(Protocol):
 
 
 def pipeline_task(**options: object) -> Callable[[Callable[..., object]], RegisteredTask]:
-    """Typed passthrough to ``celery.shared_task``.
+    """Typed passthrough that binds each task to THIS app, explicitly.
+
+    Not ``shared_task``: that binds lazily to whatever Celery app happens to be
+    current when the decorator runs. The worker starts via
+    ``-A app.workers.celery_app``, so the app exists there — but the API only
+    reaches this module through a function-local import inside
+    ``_enqueue_chain``, with nothing having imported ``celery_app`` first. The
+    tasks then bound to Celery's *default* app, whose broker is unset, and
+    every ``.delay()`` from the API dialled the amqp://localhost:5672 fallback
+    and failed with ECONNREFUSED — surfacing as a 503 on upload completion
+    while the worker itself was connected and healthy.
+
+    Binding to the imported app removes the dependence on import order.
 
     celery ships no type stubs (pyproject ignores the missing imports); this
     adapter keeps every task body strictly checked while isolating the untyped
@@ -91,7 +104,7 @@ def pipeline_task(**options: object) -> Callable[[Callable[..., object]], Regist
     """
 
     def wrap(func: Callable[..., object]) -> RegisteredTask:
-        return shared_task(func, **options)  # type: ignore[no-any-return]
+        return celery_app.task(func, **options)  # type: ignore[no-any-return]
 
     return wrap
 
@@ -455,7 +468,11 @@ def _run_stage(
         journal.mark_failed(job_row_id, "content matched no known signature")
         mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
-    except ValueError, TypeError:
+    # Parenthesised deliberately: PEP 758 allows the bare form, but only from
+    # Python 3.14, and this package declares requires-python >= 3.12 and ships
+    # on a 3.12 base image. The bare form parses on the 3.14 dev host and
+    # SyntaxErrors at import inside the container.
+    except (ValueError, TypeError):
         journal.mark_failed(job_row_id, "unsupported or malformed content")
         mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
@@ -534,8 +551,6 @@ def process_upload_chain(
         bucket=bucket_name("quarantine"),
         key=blob_key_or_data_ref,
     )
-    from app.workers.celery_app import celery_app
-
     if celery_app.conf.task_always_eager:
         curr_ctx: dict[str, object] = dict(ctx)
         for stage_fn in (

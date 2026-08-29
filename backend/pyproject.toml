@@ -54,8 +54,13 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = []
 
+# Must match requires-python and the Dockerfile base image. Targeting a
+# NEWER version than the deployment runs tells ruff that syntax the
+# container cannot parse is acceptable - that is how PEP 758's bare
+# `except A, B:` reached a 3.12 image and SyntaxError'd at import while
+# every gate passed on a 3.14 host.
 [tool.ruff]
-target-version = "py314"
+target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
@@ -88,7 +93,7 @@ quote-style = "double"
 
 [tool.mypy]
 strict = true
-python_version = "3.14"
+python_version = "3.12"
 
 [[tool.mypy.overrides]]
 module = [

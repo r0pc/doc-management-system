@@ -1,5 +1,7 @@
 """clamd INSTREAM client: exact wire framing, verdict parsing, fail-closed errors."""
 
+from __future__ import annotations
+
 import socket
 import struct
 

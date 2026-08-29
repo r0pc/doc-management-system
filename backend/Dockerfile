@@ -44,7 +44,13 @@ COPY scripts ./scripts
 # committing model weights; docker-compose mounts backend/var/models read-only
 # and points MODEL_ARTIFACT_PATH at it instead. An absent artifact is a normal
 # state: the loader returns None and every document routes to human review.
+# The storage mountpoints must EXIST in the image, owned by appuser, before a
+# named volume is mounted over them. Docker seeds a fresh named volume from the
+# image path and carries its ownership across; if the path is absent it creates
+# it root-owned instead, and the non-root process then cannot write a single
+# object (PermissionError on the first presigned PUT).
 RUN adduser --disabled-password --no-create-home appuser && \
+    mkdir -p var/storage var/models && \
     chown -R appuser:appuser /srv/app && \
     chmod -R a+rX /opt/hf-cache
 
