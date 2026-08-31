@@ -134,7 +134,7 @@ def test_intent_creates_quarantined_document_and_audits(
     assert body["upload_id"] == str(captured["document_id"])
     assert body["presigned_put"]["url"]
     expires = datetime.fromisoformat(body["presigned_put"]["expires_at"])
-    assert 0 < (expires - datetime.now(tz=UTC)).total_seconds() <= 120
+    assert 0 < (expires - datetime.now(tz=UTC)).total_seconds() <= 900
     assert captured["filename"] == "contract.pdf"
     assert len(journal) == 1
     entry = journal[0]

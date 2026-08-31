@@ -70,6 +70,7 @@ class Settings(BaseSettings):
 
     upload_max_bytes: int = 104857600
     presign_ttl_seconds: int = 90
+    upload_presign_ttl_seconds: int = 900
 
     @model_validator(mode="after")
     def _validate_dev_jwt_secret(self) -> Self:

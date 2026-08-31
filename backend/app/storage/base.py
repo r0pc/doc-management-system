@@ -25,9 +25,9 @@ class ByteStream(Protocol):
     def read(self, size: int = ..., /) -> bytes: ...
 
 
-def clamp_presign_ttl(ttl: int) -> int:
-    """Pin presigned lifetimes to the 60-120s policy window."""
-    return max(PRESIGN_MIN_TTL, min(PRESIGN_MAX_TTL, ttl))
+def clamp_presign_ttl(ttl: int, max_ttl: int = PRESIGN_MAX_TTL) -> int:
+    """Pin presigned lifetimes to the policy window."""
+    return max(PRESIGN_MIN_TTL, min(max_ttl, ttl))
 
 
 class BlobExistsError(Exception):

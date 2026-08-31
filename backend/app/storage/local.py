@@ -157,7 +157,8 @@ class LocalStorage(PrimaryBlobGuard):
 
     def presign(self, key: str, ttl: int, *, filename: str, method: str = "GET") -> str:
         """Dev HMAC URL. The method is signed: a GET credential is not a PUT one."""
-        expires = int(time.time()) + clamp_presign_ttl(ttl)
+        max_ttl = 900 if method == "PUT" else 120
+        expires = int(time.time()) + clamp_presign_ttl(ttl, max_ttl=max_ttl)
         signature = self._sign(key, expires, method)
         encoded_name = quote(filename, safe="")
         return (

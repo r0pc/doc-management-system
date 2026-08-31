@@ -170,7 +170,7 @@ class S3Storage(PrimaryBlobGuard):
                 {"Content-Type": content_type},
                 ["content-length-range", 1, max_bytes],
             ],
-            ExpiresIn=clamp_presign_ttl(ttl),
+            ExpiresIn=clamp_presign_ttl(ttl, max_ttl=900),
         )
         return PresignedUpload(url=signed["url"], fields=signed["fields"])
 

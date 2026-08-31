@@ -199,7 +199,7 @@ async def create_upload_intent(
     if payload.size_bytes > settings.upload_max_bytes:
         raise HTTPException(HTTP_413_CONTENT_TOO_LARGE, "declared size exceeds upload cap")
     document_id = uuid.uuid4()
-    ttl = clamp_presign_ttl(settings.presign_ttl_seconds)
+    ttl = settings.upload_presign_ttl_seconds
     key = quarantine_key(user.tenant_id, document_id)
     async with sessions(user.tenant_id) as session:
         actor_id = await _provision_actor(session, user)
