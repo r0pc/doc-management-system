@@ -36,7 +36,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from functools import lru_cache
 from ipaddress import ip_address
-from pathlib import Path
 from typing import Final
 
 import jwt
@@ -46,7 +45,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 
-from app.config import Settings
+from app.config import LOCAL_ROOT_ENV, Settings, resolve_storage_root
 from app.db.models import AccessLog, Department, User
 from app.db.session import bind_tenant, get_session_factory
 from app.domain.models import Action, UserCtx
@@ -56,9 +55,11 @@ from app.storage.base import Storage
 from app.storage.local import LocalStorage
 from app.storage.s3 import S3Storage
 
-# Dev-only local-storage root. Settings has no STORAGE_ROOT field this wave;
-# promoting one is flagged for the config follow-up (see wave report).
-DEFAULT_LOCAL_STORAGE_ROOT: Final = Path("var/storage")
+# Dev-only local-storage root. Honours the same override tasks.py reads
+# (LOCAL_ROOT_ENV, imported from app.config) so API and worker can never
+# resolve different roots — a split root 404s every download with no error
+# anywhere.
+DEFAULT_LOCAL_STORAGE_ROOT: Final = resolve_storage_root()
 
 TenantSessionOpener = Callable[[uuid.UUID], AbstractAsyncContextManager[AsyncSession]]
 
@@ -263,6 +264,7 @@ async def provision_actor(session: AsyncSession, user: UserCtx) -> uuid.UUID:
 
 
 __all__ = [
+    "LOCAL_ROOT_ENV",
     "TenantSessionOpener",
     "build_storage",
     "enrich_visible_departments",

@@ -42,6 +42,10 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "types-requests",
+    # Already installed transitively (docker-compose.yml parsing needs a YAML
+    # loader); declared explicitly because tests/test_storage_root_wiring.py
+    # imports it directly, not just through another dependency's use of it.
+    "pyyaml>=6.0",
 ]
 
 [build-system]

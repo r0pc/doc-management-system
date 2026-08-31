@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import deps
 from app.api.v1 import (
     admin,
     audit,
@@ -57,6 +58,31 @@ def _assert_psycopg_compatible_loop() -> None:
     raise RuntimeError(msg)
 
 
+def assert_storage_root_usable(settings: Settings) -> None:
+    """Refuse to start on an unusable local storage root.
+
+    A missing or read-only root does not fail at startup on its own — it fails
+    as a 404 on every download and a FileNotFoundError in every worker, hours
+    later and far from the cause.
+    """
+    if settings.storage_backend != "local":
+        return
+    root = deps.DEFAULT_LOCAL_STORAGE_ROOT
+    if not root.is_dir():
+        msg = (
+            f"local storage root {root} does not exist; set "
+            f"{deps.LOCAL_ROOT_ENV} to the mounted volume path"
+        )
+        raise RuntimeError(msg)
+    probe = root / ".write-probe"
+    try:
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as exc:
+        msg = f"local storage root {root} is not writable: {exc}"
+        raise RuntimeError(msg) from exc
+
+
 def _configure_app_logging() -> None:
     """Give application loggers somewhere to go.
 
@@ -86,7 +112,9 @@ def _under_pytest() -> bool:
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup validation is skipped under pytest so unit tests stay hermetic."""
     if not _under_pytest():
-        validate_runtime(Settings())
+        settings = Settings()
+        validate_runtime(settings)
+        assert_storage_root_usable(settings)
         _assert_psycopg_compatible_loop()
     yield
 

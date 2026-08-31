@@ -28,7 +28,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docmgmt}
       POSTGRES_DB: ${POSTGRES_DB:-docmgmt}
     ports:
-      - "55432:5432"  # host 5432 is occupied by a native Windows PostgreSQL service on this machine
+      - "5433:5432"  # changed from 55432 to 5433
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -119,6 +119,11 @@ services:
       DATABASE_URL: postgresql+psycopg://docmgmt_app:docmgmt@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local # dev default; switch to minio with real buckets later
+      # Pinned, not derived. resolve_storage_root() anchors on the package
+      # location, which inside the image is /srv/app/app -> /srv/var/storage,
+      # while the shared volume is mounted at /srv/app/var/storage. Deriving it
+      # silently splits the API's and worker's view of storage.
+      DOCMGMT_LOCAL_STORAGE_ROOT: /srv/app/var/storage
       SCAN_ENABLED: "true"
       # The API embeds the SEARCH QUERY (not documents) for the pgvector arm;
       # it reads the manifest so query and corpus vectors share one model.
@@ -156,6 +161,11 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
+      # Pinned, not derived. resolve_storage_root() anchors on the package
+      # location, which inside the image is /srv/app/app -> /srv/var/storage,
+      # while the shared volume is mounted at /srv/app/var/storage. Deriving it
+      # silently splits the API's and worker's view of storage.
+      DOCMGMT_LOCAL_STORAGE_ROOT: /srv/app/var/storage
       SCAN_ENABLED: "true"
       CLAMAV_HOST: clamav
       MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib
@@ -197,6 +207,11 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-docmgmt}:${POSTGRES_PASSWORD:-docmgmt}@postgres:5432/${POSTGRES_DB:-docmgmt}
       REDIS_URL: redis://redis:6379/0
       STORAGE_BACKEND: local
+      # Pinned, not derived. resolve_storage_root() anchors on the package
+      # location, which inside the image is /srv/app/app -> /srv/var/storage,
+      # while the shared volume is mounted at /srv/app/var/storage. Deriving it
+      # silently splits the API's and worker's view of storage.
+      DOCMGMT_LOCAL_STORAGE_ROOT: /srv/app/var/storage
       SCAN_ENABLED: "true"
       CLAMAV_HOST: clamav
       MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib

@@ -39,7 +39,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.classification.ml.loader import MlArtifact, embed_text, get_artifact
 from app.classification.pipeline import classify as run_classification
 from app.classification.pipeline import ml_threshold_from_env
-from app.config import Settings
+from app.config import LOCAL_ROOT_ENV as _LOCAL_ROOT_ENV
+from app.config import Settings, resolve_storage_root
 from app.domain.taxonomy import Taxonomy
 from app.extraction.base import NeedsOcrError, ParserUnavailable, UnknownMimeError
 from app.extraction.keywords import FrequencyFallback
@@ -161,15 +162,13 @@ def _settings() -> Settings:
     return _settings_instance
 
 
-_LOCAL_ROOT_ENV = "DOCMGMT_LOCAL_STORAGE_ROOT"
-
-
 def _storage() -> Storage:
-    """Backend chosen from settings; local root via env until config wave 2."""
+    """Backend chosen from settings; local root anchored to repo root."""
     cfg = _settings()
     if cfg.storage_backend == "local":
+        root = Path(os.environ.get(_LOCAL_ROOT_ENV, str(resolve_storage_root())))
         return LocalStorage(
-            Path(os.environ.get(_LOCAL_ROOT_ENV, "var/storage")),
+            root,
             signing_secret=cfg.dev_jwt_secret,
         )
     import boto3  # type: ignore[import-untyped]  # no stubs; s3.py precedent
@@ -309,6 +308,7 @@ def _scan_body(ctx: PipelineCtx) -> None:
             "clamav_unavailable: skipping malware scan (dev fail-open)",
             extra=_ids("scan", ctx),
         )
+        _promote_to_primary(ctx, data)
         raise _SkipStageError("clamav_unavailable")
     try:
         verdict = clamd_scan(CLAMAV_HOST, CLAMAV_PORT, data)

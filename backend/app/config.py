@@ -6,6 +6,7 @@ Self-hosting invariant: no hosted/cloud service endpoints exist here by design.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Final, Literal, Self
@@ -182,3 +183,18 @@ def validate_runtime(settings: Settings) -> None:
         joined = "\n  - ".join(problems)
         msg = f"refusing to start with ENV=prod:\n  - {joined}"
         raise RuntimeError(msg)
+
+
+# Single spelling of the override, shared by deps.py (API) and tasks.py
+# (worker) so the two processes can never resolve different storage roots —
+# a split root 404s every download with no error anywhere.
+LOCAL_ROOT_ENV: Final[str] = "DOCMGMT_LOCAL_STORAGE_ROOT"
+
+
+def resolve_storage_root() -> Path:
+    """Consistently resolves local storage root to repo_root/var/storage across API and workers."""
+    env_root = os.environ.get(LOCAL_ROOT_ENV)
+    if env_root:
+        return Path(env_root)
+    # Both backend/ and repo root runs will use repo_root / var / storage
+    return _REPO_ROOT / "var" / "storage"
