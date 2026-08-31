@@ -18,7 +18,8 @@ PROBLEM_TYPE = "application/problem+json"
 
 def problem_of(response: Any) -> dict[str, Any]:
     assert response.headers["content-type"] == PROBLEM_TYPE
-    return response.json()
+    res: dict[str, Any] = response.json()
+    return res
 
 
 def test_unknown_route_is_problem_json(client: Any) -> None:
@@ -82,13 +83,19 @@ def test_unexpected_exception_is_sanitised_500(
 
 
 def _drive_with_raiser(client: Any, monkeypatch: pytest.MonkeyPatch, raiser: Any) -> Any:
+    from app.storage.base import ObjectStat
     from tests.api.test_uploads import DOC_ID, patch_complete_persistence
+    from tests.api.conftest import install_worker_fake
+
+    monkeypatch.setattr(
+        "app.storage.local.LocalStorage.stat", lambda self, key: ObjectStat(size_bytes=10)
+    )
 
     captured: dict[str, Any] = {}
     patch_complete_persistence(monkeypatch, captured)
-    monkeypatch.setattr(uploads, "_persist_version", raiser)
+    monkeypatch.setattr("app.api.v1.uploads._persist_version", raiser)
     install_worker_fake(monkeypatch)
-    return client.post(f"/v1/uploads/{DOC_ID}/complete")
+    return client.post(f"/v1/uploads/{DOC_ID}/complete", json={"size_bytes": 10})
 
 
 def test_unknown_mime_maps_to_422(

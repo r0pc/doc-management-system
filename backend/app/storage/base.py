@@ -46,9 +46,27 @@ class ImmutableKeyError(Exception):
         self.key = key
 
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ObjectStat:
+    """Metadata about a stored object. Deliberately carries no bytes (#1)."""
+
+    size_bytes: int
+
+
 class Storage(Protocol):
     """Backend-neutral object storage surface (invariant #15: permission lives
     on the documents row; the object key is never an authorisation boundary)."""
+
+    def stat(self, key: str) -> ObjectStat | None:
+        """Size of the object at ``key``, or None if it does not exist.
+
+        Metadata only: the API calls this on the write path, where invariant #1
+        forbids reading the body.
+        """
+        ...
 
     def put(self, key: str, data: BinaryIO, *, content_type: str) -> str:
         """Store bytes under key; returns the key. Primary keys dedup or reject."""

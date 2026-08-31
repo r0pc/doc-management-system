@@ -115,7 +115,7 @@ def test_needs_ocr_dispatches_ocr_task_and_halts_chain(pipeline, monkeypatch) ->
     with pytest.raises(Ignore):
         tasks.extract_text(ctx)
 
-    assert pipeline.journal.skip_reasons() == {"extract": "needs_tesseract"}
+    assert pipeline.journal.skip_reasons() == {"extract": "needs_ocr"}
     assert ("queued", "ocr") in [(event, stage) for event, stage, _ in pipeline.journal.events]
 
     # Prerequisite gate: index refuses to run without an extract SUCCESS (#5).

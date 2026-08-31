@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Final, assert_never
 from urllib.parse import quote
 
-from app.storage.base import ByteStream, PrimaryBlobGuard, clamp_presign_ttl
+from app.storage.base import ByteStream, ObjectStat, PrimaryBlobGuard, clamp_presign_ttl
 from app.storage.keys import DEFAULT_BUCKET_PREFIX
 
 if TYPE_CHECKING:
@@ -113,6 +113,12 @@ class LocalStorage(PrimaryBlobGuard):
             raise ValueError(msg)
         return target
 
+    def stat(self, key: str) -> ObjectStat | None:
+        path = self._resolve(key)
+        if not path.is_file():
+            return None
+        return ObjectStat(size_bytes=path.stat().st_size)
+
     def put(self, key: str, data: BinaryIO, *, content_type: str) -> str:
         return self.guarded_put(key, data, content_type=content_type)
 
@@ -150,10 +156,15 @@ class LocalStorage(PrimaryBlobGuard):
         return io.BufferedReader(RangeFile(handle, start, end))
 
     def presign(self, key: str, ttl: int, *, filename: str) -> str:
-        """Dev HMAC URL; ``filename`` accepted for protocol parity only."""
+        """Dev HMAC URL with filename parameter."""
         expires = int(time.time()) + clamp_presign_ttl(ttl)
         signature = hmac.new(self._secret, f"{key}:{expires}".encode(), hashlib.sha256).hexdigest()
-        return f"{DEV_PRESIGN_BASE_URL}{quote(key, safe='')}?expires={expires}&sig={signature}"
+        encoded_name = quote(filename, safe="")
+        url = (
+            f"{DEV_PRESIGN_BASE_URL}{quote(key, safe='')}"
+            f"?expires={expires}&sig={signature}&filename={encoded_name}"
+        )
+        return url
 
     def verify_presign(self, key: str, expires: int, sig: str, now: float | None = None) -> bool:
         """Constant-time check of a dev presign; False once expired."""

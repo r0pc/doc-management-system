@@ -96,6 +96,15 @@ class S3Storage(PrimaryBlobGuard):
     def put(self, key: str, data: BinaryIO, *, content_type: str) -> str:
         return self.guarded_put(key, data, content_type=content_type)
 
+    def stat(self, key: str) -> ObjectStat | None:
+        try:
+            head = self._client.head_object(Bucket=self._bucket_for(key), Key=key)
+        except ClientError as exc:
+            if _is_not_found(exc):
+                return None
+            raise
+        return ObjectStat(size_bytes=int(head["ContentLength"]))
+
     def _open_existing(self, key: str) -> BinaryIO | None:
         bucket = self._bucket_for(key)
         try:

@@ -8,11 +8,10 @@
 Flow: ``POST /v1/uploads`` records intent — a ``quarantined`` documents row
 plus a presigned PUT for the browser to hit object storage directly; the API
 never touches bytes on the write path (#1). ``POST /v1/uploads/{id}/complete``
-reads the quarantined bytes ONCE, re-checks the declared size, sniffs the MIME
-type from content alone (#19 — extensions are never trusted), hashes sha256,
-promotes the blob into the immutable primary bucket (#16, dedup on equal
-bytes), records version 1 and flips status to ``processing``, then enqueues
-the worker chain.
+checks metadata (existence and declared size mismatch) ONCE, records version 1
+and flips status to ``processing``, then enqueues the worker chain. Sniffing
+the MIME type from content alone (#19), hashing sha256, and promoting the blob
+into the immutable primary bucket (#16) happen in the worker.
 
 Broker-failure decision (per wave instructions): if enqueueing the pipeline
 chain fails — the task module is absent this wave or the broker is down — the
@@ -261,6 +260,23 @@ async def complete_upload(
             return not_found()
         if doc.status != "quarantined":
             raise HTTPException(HTTP_409_CONFLICT, "document is not quarantined")
+
+        # #1 keeps the API off the bytes, so verify metadata only. Without this
+        # a client can complete an upload it never PUT: the chain fires, the
+        # worker cannot find the object, and the document strands.
+        quarantine = storage.stat(quarantine_key(doc.tenant_id, doc.id))
+        if quarantine is None:
+            raise HTTPException(
+                HTTP_409_CONFLICT, "upload did not arrive; the object was never stored"
+            )
+        if payload is not None and payload.size_bytes is not None:
+            if quarantine.size_bytes != payload.size_bytes:
+                raise HTTPException(
+                    HTTP_409_CONFLICT,
+                    "stored object size does not match the declared size",
+                )
+        if quarantine.size_bytes > settings.upload_max_bytes:
+            raise HTTPException(HTTP_413_CONTENT_TOO_LARGE, "stored object exceeds upload cap")
 
         actor_id = await _provision_actor(session, user)
         version_id = await _persist_version(session, document_id=doc.id, actor_id=actor_id)

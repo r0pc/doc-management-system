@@ -1,8 +1,7 @@
 """Upload intent + completion tests.
 
-Real code under test: size-cap gating, MIME sniffing over stored bytes (#19),
-sha256 derivation, audit actions, broker-failure semantics. Persistence and
-enqueue seams are fakes per the conftest strategy.
+Real code under test: size-cap gating, audit actions, broker-failure semantics.
+Persistence and enqueue seams are fakes per the conftest strategy.
 """
 
 import io
