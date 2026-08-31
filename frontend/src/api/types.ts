@@ -17,6 +17,7 @@ export interface CompleteResponse {
   document_id: string;
   version_id: string;
   status: string;
+  duplicate_of?: string | null;
 }
 
 export interface DocumentListItem {
@@ -26,6 +27,7 @@ export interface DocumentListItem {
   level: string | null;
   doc_type: string | null;
   created_at: string;
+  duplicate_of?: string[];
 }
 
 export interface DocumentPage {

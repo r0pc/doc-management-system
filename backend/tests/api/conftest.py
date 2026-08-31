@@ -97,12 +97,24 @@ def settings_override() -> Settings:
 
 
 @pytest.fixture
-def blob_storage(tmp_path: Path, settings_override: Settings) -> LocalStorage:
-    return LocalStorage(
+def blob_storage(
+    tmp_path: Path, settings_override: Settings, monkeypatch: pytest.MonkeyPatch
+) -> LocalStorage:
+    storage = LocalStorage(
         tmp_path / "blobs",
         signing_secret=settings_override.dev_jwt_secret,
         bucket_prefix=settings_override.minio_bucket_prefix,
     )
+    # Spy on open to enforce invariant #1 (API never reads object bytes)
+    storage.open_calls = []  # type: ignore[attr-defined]
+    original_open = storage.open
+
+    def open_spy(key: str, **kwargs: Any) -> Any:
+        storage.open_calls.append(key)  # type: ignore[attr-defined]
+        return original_open(key, **kwargs)
+
+    monkeypatch.setattr(storage, "open", open_spy)
+    return storage
 
 
 @pytest.fixture
@@ -183,6 +195,33 @@ def client_factory(
     def make(user: UserCtx | None = None, **client_kwargs: bool) -> TestClient:
         app = build_app(monkeypatch, settings_override, blob_storage, user=user)
         return TestClient(app, **client_kwargs)
+
+    def with_ready_document() -> tuple[TestClient, uuid.UUID]:
+        client = make(user=make_user())
+        doc_id = uuid.uuid4()
+        from app.api.v1.documents import DocumentView
+        from datetime import UTC, datetime
+        async def fake_view(*a: Any, **k: Any) -> DocumentView:
+            return DocumentView(
+                id=doc_id,
+                tenant_id=TENANT_A,
+                department_id=None,
+                level_rank=1,
+                deleted_at=None,
+                status="ready",
+                original_filename="a.pdf",
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                level_name="public",
+                doc_type_name=None,
+                blob_key="docs-primary/t/ab/abc",
+                blob_mime="application/pdf",
+                blob_size=10,
+                current_version_id=uuid.uuid4(),
+            )
+        monkeypatch.setattr("app.api.v1.documents._fetch_document_view", fake_view)
+        return client, doc_id
+
+    make.with_ready_document = with_ready_document  # type: ignore[attr-defined]
 
     return make
 

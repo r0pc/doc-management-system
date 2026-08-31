@@ -30,6 +30,7 @@ human-decided lowering that workers can never perform (#8).
 from __future__ import annotations
 
 import base64
+import json
 import re
 import uuid
 from collections.abc import Iterator
@@ -40,21 +41,24 @@ from typing import Any, BinaryIO, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, insert, or_, select, tuple_, update
+from sqlalchemy import and_, func, insert, or_, select, tuple_, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_416_RANGE_NOT_SATISFIABLE
 
 from app.api import deps
 from app.api.v1.errors import not_found
+from app.classification.pipeline import ml_threshold_from_env
 from app.config import Settings
 from app.db.models import (
     Blob,
     Classification,
     DocType,
     Document,
+    DocumentKeyword,
     DocumentVersion,
     Finding,
+    Keyword,
     ProcessingJob,
     ReviewItem,
     SecurityLevel,
@@ -69,6 +73,7 @@ from app.domain.models import (
 )
 from app.domain.policy import can_access
 from app.storage.base import Storage
+from app.storage.keys import derived_key
 
 # allow: SIZE_OK - the whole /v1/documents resource surface (6 endpoints,
 # wire models, cursor/range codecs, data-access seams) lives here because
@@ -101,6 +106,7 @@ class DocumentListItem(BaseModel):
     level: str | None
     doc_type: str | None
     created_at: datetime
+    duplicate_of: list[uuid.UUID] = []
 
 
 class DocumentPage(BaseModel):
@@ -115,6 +121,36 @@ class FindingOut(BaseModel):
     char_start: int
     char_end: int
     score: float
+    line_no: int | None = None
+    snippet: str | None = None
+    contributed_level: str | None = None
+
+
+class PageTextOut(BaseModel):
+    page_no: int
+    text: str
+
+
+class ClassificationJustification(BaseModel):
+    level: str
+    level_rank: int
+    level_reason: str
+    doc_type: str | None
+    decided_by: str
+    confidence: float | None
+    confidence_threshold: float
+    keywords: list[str]
+    findings: list[FindingOut]
+
+
+class DocumentPreviewOut(BaseModel):
+    id: uuid.UUID
+    filename: str
+    mime: str | None
+    char_count: int
+    pages: list[PageTextOut]
+    full_text: str
+    justification: ClassificationJustification
 
 
 class JobOut(BaseModel):
@@ -159,12 +195,57 @@ class DocumentView:
     blob_mime: str | None
     blob_size: int | None
     current_version_id: uuid.UUID | None
+    blob_sha256: str | None = None
+    decided_by: str | None = None
+    confidence: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ReclassifyContext:
     view: DocumentView
     current_version_id: uuid.UUID
+
+
+# --- helpers for snippet and line computation ---
+
+
+def _compute_line_no(text: str, char_idx: int) -> int:
+    return text[:char_idx].count("\n") + 1
+
+
+def _compute_snippet(text: str, start: int, end: int, window: int = 40) -> str:
+    snippet_start = max(0, start - window)
+    snippet_end = min(len(text), end + window)
+    prefix = "..." if snippet_start > 0 else ""
+    suffix = "..." if snippet_end < len(text) else ""
+    return f"{prefix}{text[snippet_start:snippet_end]}{suffix}"
+
+
+def _contributed_level(entity_type: str, count: int = 1) -> str:
+    if entity_type in (
+        "card_number",
+        "bank_account",
+        "passport_number",
+        "salary_with_named_person",
+    ):
+        return "Restricted"
+    if entity_type == "cnic":
+        return "Restricted" if count >= 3 else "Confidential"
+    return "Internal"
+
+
+def _build_level_reason(level_name: str | None, findings: list[FindingOut]) -> str:
+    if not findings:
+        return (
+            "Internal: Default floor (no sensitive PII entities detected). "
+            "Baseline organizational clearance."
+        )
+    types_detected = sorted({f.entity_type.replace("_", " ").title() for f in findings})
+    types_str = ", ".join(types_detected)
+    return (
+        f"{level_name or 'Restricted'}: Triggered by {len(findings)} sensitive "
+        f"pattern match(es) ({types_str})."
+    )
 
 
 # --- cursor codec (opaque, keyset on (created_at, id)) ---
@@ -281,6 +362,36 @@ async def _fetch_document_page(
     ]
 
 
+async def _fetch_content_siblings(
+    session: AsyncSession, document_id: uuid.UUID, tenant_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Other visible documents in this tenant sharing this document's bytes.
+
+    Content dedup already happens at the blob layer; this only tells the user
+    the duplicate exists. Scoped to the tenant and to non-deleted rows, so it
+    reveals nothing the list endpoint would not (#15: the object key is never
+    an authorization boundary — permission lives on the documents row).
+    """
+    this_sha = (
+        select(DocumentVersion.blob_sha256)
+        .where(DocumentVersion.document_id == document_id)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(Document.id)
+        .join(DocumentVersion, DocumentVersion.document_id == Document.id)
+        .where(
+            DocumentVersion.blob_sha256 == this_sha,
+            DocumentVersion.blob_sha256.is_not(None),
+            Document.id != document_id,
+            Document.tenant_id == tenant_id,
+            Document.deleted_at.is_(None),
+        )
+        .order_by(Document.created_at.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def _fetch_document_view(
     session: AsyncSession, document_id: uuid.UUID
 ) -> DocumentView | None:
@@ -301,6 +412,9 @@ async def _fetch_document_view(
                 Blob.mime_sniffed,
                 Blob.size_bytes,
                 DocumentVersion.id.label("version_id"),
+                DocumentVersion.blob_sha256,
+                Classification.decided_by,
+                Classification.confidence,
             )
             .join(
                 Classification,
@@ -311,7 +425,13 @@ async def _fetch_document_view(
             .join(DocType, Classification.doc_type_id == DocType.id, isouter=True)
             .join(
                 DocumentVersion,
-                Classification.version_id == DocumentVersion.id,
+                or_(
+                    Classification.version_id == DocumentVersion.id,
+                    and_(
+                        Classification.id.is_(None),
+                        DocumentVersion.document_id == Document.id,
+                    ),
+                ),
                 isouter=True,
             )
             .join(Blob, DocumentVersion.blob_sha256 == Blob.sha256, isouter=True)
@@ -321,6 +441,18 @@ async def _fetch_document_view(
     if row is None:
         return None
     return DocumentView(*row)
+
+
+async def _fetch_keywords(session: AsyncSession, document_id: uuid.UUID) -> list[str]:
+    stmt = (
+        select(Keyword.term)
+        .join(DocumentKeyword, Keyword.id == DocumentKeyword.keyword_id)
+        .where(DocumentKeyword.document_id == document_id)
+        .order_by(DocumentKeyword.score.desc())
+        .limit(10)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return list(rows)
 
 
 async def _fetch_findings(session: AsyncSession, document_id: uuid.UUID) -> list[FindingOut]:
@@ -492,6 +624,7 @@ async def get_document(
         view = await _fetch_document_view(session, document_id)
         if _denied(view, user, Action.VIEW) or view is None:
             return not_found()
+        siblings = await _fetch_content_siblings(session, document_id, user.tenant_id)
         return DocumentListItem(
             id=view.id,
             filename=view.original_filename,
@@ -499,6 +632,7 @@ async def get_document(
             level=view.level_name,
             doc_type=view.doc_type_name,
             created_at=view.created_at,
+            duplicate_of=siblings,
         )
 
 
@@ -510,8 +644,23 @@ def _stream_handle(handle: BinaryIO) -> Iterator[bytes]:
         handle.close()
 
 
+def _ensure_filename_extension(filename: str, mime: str | None) -> str:
+    cleaned = filename.strip() or "document"
+    if "." in cleaned:
+        return cleaned
+    if mime == "application/pdf":
+        return f"{cleaned}.pdf"
+    if mime == "text/plain":
+        return f"{cleaned}.txt"
+    if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return f"{cleaned}.docx"
+    if mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return f"{cleaned}.xlsx"
+    return cleaned
+
+
 @router.get("/{document_id}/content")
-async def get_document_content(
+async def download_document_content(
     request: Request,
     document_id: uuid.UUID,
     user: UserCtx = Depends(deps.require(Action.DOWNLOAD)),
@@ -519,12 +668,14 @@ async def get_document_content(
     settings: Settings = Depends(deps.get_settings),
     storage: Storage = Depends(deps.get_storage),
 ) -> Response:
+    """Byte-serving endpoint (§6.3, Invariants #17, #18, #30)."""
     async with sessions(user.tenant_id) as session:
         view = await _fetch_document_view(session, document_id)
         if _denied(view, user, Action.DOWNLOAD) or view is None:
             return not_found()
         if view.blob_key is None:
             return not_found()
+        download_name = _ensure_filename_extension(view.original_filename, view.blob_mime)
         total = view.blob_size or 0
         rank = view.level_rank if view.level_rank is not None else DEFAULT_FLOOR_RANK
         if rank >= LEVEL_RANK[LevelName.CONFIDENTIAL]:
@@ -534,6 +685,7 @@ async def get_document_content(
             headers = {
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(length),
+                "Content-Disposition": f'attachment; filename="{download_name}"',
             }
             status = 200
             if byte_range is not None:
@@ -560,7 +712,7 @@ async def get_document_content(
         url = storage.presign(
             view.blob_key,
             settings.presign_ttl_seconds,
-            filename=view.original_filename,
+            filename=download_name,
         )
         actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
@@ -575,18 +727,217 @@ async def get_document_content(
         return RedirectResponse(url, status_code=303)
 
 
+@router.get("/{document_id}/view")
+async def view_document_content(
+    request: Request,
+    document_id: uuid.UUID,
+    user: UserCtx = Depends(deps.require(Action.PREVIEW)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+    settings: Settings = Depends(deps.get_settings),
+    storage: Storage = Depends(deps.get_storage),
+) -> Response:
+    """Inline view for in-browser inspection (Action.PREVIEW - Invariant #18)."""
+    async with sessions(user.tenant_id) as session:
+        view = await _fetch_document_view(session, document_id)
+        if _denied(view, user, Action.PREVIEW) or view is None:
+            return not_found()
+        if view.blob_key is None:
+            return not_found()
+        view_name = _ensure_filename_extension(view.original_filename, view.blob_mime)
+        total = view.blob_size or 0
+        rank = view.level_rank if view.level_rank is not None else DEFAULT_FLOOR_RANK
+        if rank >= LEVEL_RANK[LevelName.CONFIDENTIAL]:
+            byte_range = parse_range(request.headers.get("range"), total)
+            handle = storage.open(view.blob_key, byte_range=byte_range)
+            length = total if byte_range is None else byte_range[1] - byte_range[0] + 1
+            headers = {
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(length),
+                "Content-Disposition": f'inline; filename="{view_name}"',
+            }
+            status = 200
+            if byte_range is not None:
+                status = 206
+                headers["Content-Range"] = f"bytes {byte_range[0]}-{byte_range[1]}/{total}"
+            actor_id = await deps.provision_actor(session, user)
+            await deps.record_audit(
+                session,
+                tenant_id=user.tenant_id,
+                document_id=view.id,
+                actor_id=actor_id,
+                action="preview.stream",
+                request=request,
+            )
+            await session.commit()
+            return StreamingResponse(
+                _stream_handle(handle),
+                status_code=status,
+                media_type=view.blob_mime or "application/octet-stream",
+                headers=headers,
+            )
+        url = storage.presign(
+            view.blob_key,
+            settings.presign_ttl_seconds,
+            filename=view_name,
+        )
+        actor_id = await deps.provision_actor(session, user)
+        await deps.record_audit(
+            session,
+            tenant_id=user.tenant_id,
+            document_id=view.id,
+            actor_id=actor_id,
+            action="preview.presign",
+            request=request,
+        )
+        await session.commit()
+        return RedirectResponse(url, status_code=303)
+
+
+@router.get("/{document_id}/preview", response_model=DocumentPreviewOut)
+async def get_document_preview(
+    request: Request,
+    document_id: uuid.UUID,
+    user: UserCtx = Depends(deps.require(Action.PREVIEW)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+    storage: Storage = Depends(deps.get_storage),
+) -> DocumentPreviewOut | Response:
+    """Full text, page structure, and classification justification (Action.PREVIEW)."""
+    async with sessions(user.tenant_id) as session:
+        view = await _fetch_document_view(session, document_id)
+        if _denied(view, user, Action.PREVIEW) or view is None:
+            return not_found()
+
+        raw_findings = await _fetch_findings(session, document_id)
+        keywords = await _fetch_keywords(session, document_id)
+
+        full_text = ""
+        pages: list[PageTextOut] = []
+        char_count = 0
+
+        if view.blob_sha256:
+            try:
+                derived_path = derived_key(view.blob_sha256, "text.json")
+                with storage.open(derived_path) as handle:
+                    data = json.loads(handle.read().decode("utf-8"))
+                    full_text = str(data.get("text", ""))
+                    char_count = int(data.get("char_count", len(full_text)))
+                    for p in data.get("pages", []):
+                        pages.append(
+                            PageTextOut(
+                                page_no=p.get("page_no", 1),
+                                text=p.get("text", ""),
+                            )
+                        )
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                full_text = ""
+
+        if not pages and full_text:
+            pages = [PageTextOut(page_no=1, text=full_text)]
+
+        cnic_count = sum(1 for f in raw_findings if f.entity_type == "cnic")
+        enriched_findings: list[FindingOut] = []
+        for f in raw_findings:
+            line_no = _compute_line_no(full_text, f.char_start) if full_text else None
+            snippet = _compute_snippet(full_text, f.char_start, f.char_end) if full_text else None
+            level = _contributed_level(f.entity_type, cnic_count)
+            enriched_findings.append(
+                FindingOut(
+                    entity_type=f.entity_type,
+                    rule_id=f.rule_id,
+                    page_no=f.page_no,
+                    char_start=f.char_start,
+                    char_end=f.char_end,
+                    score=f.score,
+                    line_no=line_no,
+                    snippet=snippet,
+                    contributed_level=level,
+                )
+            )
+
+        level_name = view.level_name or "Internal"
+        level_rank = view.level_rank or DEFAULT_FLOOR_RANK
+        level_reason = _build_level_reason(level_name, enriched_findings)
+
+        threshold = ml_threshold_from_env()
+
+        justification = ClassificationJustification(
+            level=level_name,
+            level_rank=level_rank,
+            level_reason=level_reason,
+            doc_type=view.doc_type_name,
+            decided_by=view.decided_by or "rules",
+            confidence=view.confidence,
+            confidence_threshold=threshold,
+            keywords=keywords,
+            findings=enriched_findings,
+        )
+
+        actor_id = await deps.provision_actor(session, user)
+        await deps.record_audit(
+            session,
+            tenant_id=user.tenant_id,
+            document_id=view.id,
+            actor_id=actor_id,
+            action="preview.read",
+            request=request,
+        )
+        await session.commit()
+
+        return DocumentPreviewOut(
+            id=view.id,
+            filename=view.original_filename,
+            mime=view.blob_mime,
+            char_count=char_count,
+            pages=pages,
+            full_text=full_text,
+            justification=justification,
+        )
+
+
 @router.get("/{document_id}/findings", response_model=list[FindingOut])
 async def get_document_findings(
     request: Request,
     document_id: uuid.UUID,
     user: UserCtx = Depends(deps.require(Action.PREVIEW)),
     sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+    storage: Storage = Depends(deps.get_storage),
 ) -> list[FindingOut] | Response:
     async with sessions(user.tenant_id) as session:
         view = await _fetch_document_view(session, document_id)
         if _denied(view, user, Action.PREVIEW) or view is None:
             return not_found()
-        findings = await _fetch_findings(session, document_id)
+        raw_findings = await _fetch_findings(session, document_id)
+
+        full_text = ""
+        if view.blob_sha256:
+            try:
+                derived_path = derived_key(view.blob_sha256, "text.json")
+                with storage.open(derived_path) as handle:
+                    data = json.loads(handle.read().decode("utf-8"))
+                    full_text = str(data.get("text", ""))
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                full_text = ""
+
+        cnic_count = sum(1 for f in raw_findings if f.entity_type == "cnic")
+        enriched: list[FindingOut] = []
+        for f in raw_findings:
+            line_no = _compute_line_no(full_text, f.char_start) if full_text else None
+            snippet = _compute_snippet(full_text, f.char_start, f.char_end) if full_text else None
+            level = _contributed_level(f.entity_type, cnic_count)
+            enriched.append(
+                FindingOut(
+                    entity_type=f.entity_type,
+                    rule_id=f.rule_id,
+                    page_no=f.page_no,
+                    char_start=f.char_start,
+                    char_end=f.char_end,
+                    score=f.score,
+                    line_no=line_no,
+                    snippet=snippet,
+                    contributed_level=level,
+                )
+            )
+
         actor_id = await deps.provision_actor(session, user)
         await deps.record_audit(
             session,
@@ -597,7 +948,7 @@ async def get_document_findings(
             request=request,
         )
         await session.commit()
-        return findings
+        return enriched
 
 
 @router.get("/{document_id}/jobs", response_model=list[JobOut])

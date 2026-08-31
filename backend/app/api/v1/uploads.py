@@ -85,6 +85,7 @@ class CompleteResponse(BaseModel):
     document_id: uuid.UUID
     version_id: uuid.UUID
     status: str
+    duplicate_of: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

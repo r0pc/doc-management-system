@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import { DocumentListItem, JobOut, FindingOut } from '../../api/types';
+import { DocumentListItem, JobOut, FindingOut, DocumentPreviewOut } from '../../api/types';
 import { LevelBadge } from '../../components/common/LevelBadge';
 import { Button } from '../../components/ui/button';
 import { LoadingSkeleton } from '../../components/common/LoadingSkeleton';
@@ -10,11 +10,15 @@ import { formatDate } from '../../lib/utils';
 import {
   X,
   Download,
+  ExternalLink,
   ShieldAlert,
+  ShieldCheck,
   FileText,
   Clock,
   History,
-  Sparkles,
+  Tag,
+  Cpu,
+  Eye,
 } from 'lucide-react';
 import { trapFocus } from '../../lib/focus-trap';
 import { Can } from '../../security/Can';
@@ -32,7 +36,9 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
   onReclassify,
 }) => {
   const [downloading, setDownloading] = useState(false);
+  const [openingInBrowser, setOpeningInBrowser] = useState(false);
   const [downloadError, setDownloadError] = useState<unknown>(null);
+  const [showPreview, setShowPreview] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -48,8 +54,6 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     document.addEventListener('keydown', handleKeyDown);
     document.body.style.overflow = 'hidden';
 
-    // Focus synchronously rather than on a 50ms timer, which could fire after
-    // the drawer had already unmounted and stole focus back from the page.
     closeButtonRef.current?.focus();
 
     const releaseFocus = panelRef.current ? trapFocus(panelRef.current) : () => {};
@@ -68,34 +72,24 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     enabled: !!documentId,
   });
 
-  const { data: jobs } = useQuery({
-    queryKey: ['document', documentId, 'jobs'],
-    queryFn: () => api.get<JobOut[]>(`/v1/documents/${documentId}/jobs`),
-    enabled: !!documentId,
-  });
-
   const { data: findings } = useQuery({
     queryKey: ['document', documentId, 'findings'],
     queryFn: () => api.get<FindingOut[]>(`/v1/documents/${documentId}/findings`),
     enabled: !!documentId,
   });
 
-  /**
-   * Download (invariants #17 / #18).
-   *
-   * There is ONE request, to the API's own content endpoint, whatever the
-   * document's level. The server chooses the delivery mode from the level it
-   * has on record: Confidential/Restricted stream back through the API with an
-   * audit row per response; Public/Internal come back as a 303 to a short-TTL
-   * presigned URL that the browser follows (dropping the Authorization header
-   * on the cross-origin hop).
-   *
-   * This used to be two branches selected from `doc.level` as rendered in this
-   * drawer — a client-side guess at a server-side decision, on data that can be
-   * stale by the time the button is clicked. The label below still *reports*
-   * the expected mode, but nothing here can route a Restricted document down
-   * the presigned path: the frontend has no storage URL to route it to.
-   */
+  const { data: previewData } = useQuery({
+    queryKey: ['document', documentId, 'preview'],
+    queryFn: () => api.get<DocumentPreviewOut>(`/v1/documents/${documentId}/preview`),
+    enabled: !!documentId,
+  });
+
+  const { data: jobs } = useQuery({
+    queryKey: ['document', documentId, 'jobs'],
+    queryFn: () => api.get<JobOut[]>(`/v1/documents/${documentId}/jobs`),
+    enabled: !!documentId,
+  });
+
   const handleDownload = async () => {
     if (!doc) return;
     try {
@@ -103,17 +97,27 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
       setDownloadError(null);
 
       const { blob, filename } = await api.fetchDocumentContent(doc.id);
+      let downloadFilename = filename || doc.filename || 'document';
+      if (!downloadFilename.includes('.')) {
+        if (blob.type === 'application/pdf') {
+          downloadFilename += '.pdf';
+        } else if (blob.type === 'text/plain') {
+          downloadFilename += '.txt';
+        } else if (blob.type.includes('wordprocessingml')) {
+          downloadFilename += '.docx';
+        } else if (blob.type.includes('spreadsheetml')) {
+          downloadFilename += '.xlsx';
+        }
+      }
 
       const url = window.URL.createObjectURL(blob);
       const a = window.document.createElement('a');
       a.href = url;
-      a.download = filename || doc.filename || 'document';
+      a.download = downloadFilename;
       a.rel = 'noopener';
       window.document.body.appendChild(a);
       a.click();
       window.document.body.removeChild(a);
-      // Revoking synchronously after click() races the browser's read of the
-      // blob in some engines; defer to the next task.
       setTimeout(() => window.URL.revokeObjectURL(url), 0);
     } catch (err: unknown) {
       setDownloadError(err);
@@ -122,7 +126,35 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     }
   };
 
+  const handleOpenInBrowser = async () => {
+    if (!doc) return;
+    const newWindow = window.open('about:blank', '_blank');
+    try {
+      setOpeningInBrowser(true);
+      setDownloadError(null);
+
+      const { blob } = await api.fetchDocumentView(doc.id);
+      const url = window.URL.createObjectURL(blob);
+      if (newWindow) {
+        newWindow.location.href = url;
+      } else {
+        window.open(url, '_blank');
+      }
+      setTimeout(() => window.URL.revokeObjectURL(url), 120000);
+    } catch (err: unknown) {
+      if (newWindow) {
+        newWindow.close();
+      }
+      setDownloadError(err);
+    } finally {
+      setOpeningInBrowser(false);
+    }
+  };
+
   if (!documentId) return null;
+
+  const displayFindings = previewData?.justification?.findings || findings || [];
+  const justification = previewData?.justification;
 
   return (
     <div 
@@ -135,7 +167,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
       <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
         <div
           ref={panelRef}
-          className="w-screen max-w-xl bg-white dark:bg-[#161b22] border-l border-[#d0d7de] dark:border-[#30363d] shadow-2xl flex flex-col transition-colors"
+          className="w-screen max-w-2xl bg-white dark:bg-[#161b22] border-l border-[#d0d7de] dark:border-[#30363d] shadow-2xl flex flex-col transition-colors"
         >
           {/* Header */}
           <div className="p-4 sm:p-5 border-b border-[#d0d7de] dark:border-[#30363d] flex items-center justify-between bg-[#f6f8fa] dark:bg-[#161b22]">
@@ -167,6 +199,17 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
               <>
                 <ProblemAlert error={downloadError} />
 
+                {doc.duplicate_of && doc.duplicate_of.length > 0 && (
+                  <div className="p-3 rounded-md bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/50 flex gap-2 text-blue-900 dark:text-blue-200">
+                    <FileText className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs leading-relaxed">
+                        This content is identical to {doc.duplicate_of.length} other document(s) in your tenant.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Primary Metadata Box */}
                 <div className="space-y-3 pb-5 border-b border-[#d8dee4] dark:border-[#30363d]">
                   <div className="flex items-start justify-between gap-3">
@@ -178,9 +221,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                         ID: {doc.id}
                       </p>
                     </div>
-                    <LevelBadge
-                      level={doc.level}
-                    />
+                    <LevelBadge level={doc.level} />
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs p-3 bg-[#f6f8fa] dark:bg-[#21262d] rounded-md border border-[#d0d7de] dark:border-[#30363d]">
@@ -190,14 +231,36 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                         {doc.doc_type || 'Unclassified'}
                       </span>
                     </div>
+                    {justification?.decided_by && (
+                      <div>
+                        <span className="text-[#656d76] dark:text-[#848d97] block text-[11px]">Classifier Engine:</span>
+                        <span className="font-medium text-[#1f2328] dark:text-[#e6edf3] uppercase text-[10px]">
+                          {justification.decided_by}
+                          {justification.confidence != null ? ` (${(justification.confidence * 100).toFixed(1)}%)` : ''}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* Classification Justification & Risk Rationale */}
+                {justification?.level_reason && (
+                  <div className="p-3.5 bg-blue-50/50 dark:bg-blue-950/20 rounded-md border border-blue-200/80 dark:border-blue-900/50 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-blue-900 dark:text-blue-200 font-semibold text-xs">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Security Level Justification
+                    </div>
+                    <p className="text-xs text-blue-950 dark:text-blue-100 leading-relaxed">
+                      {justification.level_reason}
+                    </p>
+                  </div>
+                )}
 
                 {/* Classification Actions */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h4 className="font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-[#0969da] dark:text-[#2f81f7]" />
+                      <Cpu className="w-3.5 h-3.5 text-[#0969da] dark:text-[#2f81f7]" />
                       Classification Actions
                     </h4>
                     {onReclassify && (
@@ -213,30 +276,54 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                       </Can>
                     )}
                   </div>
+
+                  {justification?.keywords && justification.keywords.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {justification.keywords.map((kw, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 rounded-full text-[11px] bg-[#f6f8fa] dark:bg-[#21262d] border border-[#d0d7de] dark:border-[#30363d] text-[#656d76] dark:text-[#848d97] flex items-center gap-1"
+                        >
+                          <Tag className="w-2.5 h-2.5" /> #{kw}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {/* Sensitive Findings Offsets (Invariant #12) */}
+                {/* Sensitive Findings (Invariant #12) */}
                 <div className="space-y-2">
                   <h4 className="font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] flex items-center gap-1.5">
                     <ShieldAlert className="w-3.5 h-3.5 text-[#cf222e] dark:text-[#f85149]" />
                     Sensitive Findings (Offsets Only — Invariant #12)
                   </h4>
-                  {findings && findings.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {findings.map((f, i) => (
+                  {displayFindings.length > 0 ? (
+                    <div className="space-y-2">
+                      {displayFindings.map((f, i) => (
                         <div
                           key={i}
-                          className="p-2 bg-white dark:bg-[#0d1117] rounded border border-[#d0d7de] dark:border-[#30363d] flex items-center justify-between text-xs"
+                          className="p-3 bg-white dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] space-y-1.5 text-xs"
                         >
-                          <span className="font-semibold uppercase text-[10px] tracking-wider px-1.5 py-0.5 rounded bg-[#ffebe9] dark:bg-[#da3633]/25 text-[#cf222e] dark:text-[#f85149] border border-[#ff8182]/30">
-                            {f.entity_type}
-                          </span>
-                          <span className="font-mono text-[#656d76] dark:text-[#848d97] text-[11px]">
-                            Chars [{f.char_start}..{f.char_end}]
-                          </span>
-                          <span className="font-mono text-[11px] text-[#1f2328] dark:text-[#e6edf3]">
-                            {(f.score * 100).toFixed(0)}% score
-                          </span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold uppercase text-[10px] tracking-wider px-1.5 py-0.5 rounded bg-[#ffebe9] dark:bg-[#da3633]/25 text-[#cf222e] dark:text-[#f85149] border border-[#ff8182]/30">
+                                {f.entity_type.replace('_', ' ')}
+                              </span>
+                              {(f.page_no != null || f.line_no != null) && (
+                                <span className="text-[11px] font-medium text-[#1f2328] dark:text-[#e6edf3]">
+                                  Page {f.page_no || 1}{f.line_no ? `, Line ${f.line_no}` : ''}
+                                </span>
+                              )}
+                            </div>
+                            <span className="font-mono text-[#656d76] dark:text-[#848d97] text-[11px]">
+                              Chars [{f.char_start}..{f.char_end}] • {(f.score * 100).toFixed(0)}% score
+                            </span>
+                          </div>
+                          {f.snippet && (
+                            <div className="p-2 bg-[#f6f8fa] dark:bg-[#161b22] rounded border border-[#d0d7de]/60 dark:border-[#30363d]/60 font-mono text-[11px] text-[#1f2328] dark:text-[#e6edf3] break-all">
+                              {f.snippet}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -246,6 +333,31 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                     </p>
                   )}
                 </div>
+
+                {/* Content Text Viewer Toggle */}
+                {previewData?.full_text && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] flex items-center gap-1.5">
+                        <Eye className="w-3.5 h-3.5 text-[#0969da] dark:text-[#2f81f7]" />
+                        Document Content Preview
+                      </h4>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowPreview(!showPreview)}
+                        className="h-6 text-[11px] text-[#0969da] dark:text-[#2f81f7]"
+                      >
+                        {showPreview ? 'Hide Text' : 'View Text'}
+                      </Button>
+                    </div>
+                    {showPreview && (
+                      <div className="p-3 bg-[#f6f8fa] dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] max-h-60 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-[#1f2328] dark:text-[#e6edf3]">
+                        {previewData.full_text}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Processing Pipeline Timeline (Invariant #4) */}
                 <div className="space-y-2">
@@ -293,21 +405,21 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
           {/* Footer Actions */}
           {doc && (
             <div className="p-4 border-t border-[#d0d7de] dark:border-[#30363d] bg-[#f6f8fa] dark:bg-[#161b22] flex items-center justify-between gap-3">
-              {/*
-                Informational only: the SERVER picks the delivery mode from the
-                level it holds (#17). This label reports the expected mode from
-                the level shown in this drawer; it selects nothing.
-              */}
               <span className="text-[11px] text-[#656d76] dark:text-[#848d97]" data-testid="delivery-mode">
                 Delivery: {['confidential', 'restricted'].includes(doc.level ? doc.level.toLowerCase() : '') ? 'API Stream (Range)' : 'Presigned 303'}
               </span>
               <div className="flex items-center gap-2">
-                {/*
-                  Gated on DOWNLOAD, never on PREVIEW: they are separate
-                  permissions (#18), and a preview-only user must not be shown a
-                  control that fetches the bytes. This is chrome — the API
-                  re-authorizes the DOWNLOAD action on every content request.
-                */}
+                <Can action={Action.PREVIEW} document={doc}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleOpenInBrowser}
+                    disabled={openingInBrowser}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                    {openingInBrowser ? 'Opening...' : 'Open in Browser'}
+                  </Button>
+                </Can>
                 <Can action={Action.DOWNLOAD} document={doc}>
                   <Button
                     size="sm"
@@ -327,3 +439,4 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     </div>
   );
 };
+
