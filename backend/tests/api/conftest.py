@@ -148,6 +148,21 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return entries
 
 
+@pytest.fixture
+def captured_page_args(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    from app.api.v1 import documents
+    
+    captured: dict[str, Any] = {}
+    original = documents._fetch_document_page
+
+    async def spy(session, user, after, limit_plus_one, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(documents, "_fetch_document_page", spy)
+    return captured
+
+
 @pytest.fixture(autouse=True)
 def mock_provision_actor(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_provision(session: Any, user: UserCtx) -> UUID:

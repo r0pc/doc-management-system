@@ -36,7 +36,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, BinaryIO, cast
+from typing import Any, BinaryIO, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -74,6 +74,8 @@ from app.domain.models import (
 from app.domain.policy import can_access
 from app.storage.base import Storage
 from app.storage.keys import derived_key
+
+DOCUMENT_STATUSES = ("quarantined", "processing", "ready", "failed", "held")
 
 # allow: SIZE_OK - the whole /v1/documents resource surface (6 endpoints,
 # wire models, cursor/range codecs, data-access seams) lives here because
@@ -311,6 +313,9 @@ async def _fetch_document_page(
     user: UserCtx,
     after: tuple[datetime, uuid.UUID] | None,
     limit_plus_one: int,
+    *,
+    status: str | None = None,
+    level: str | None = None,
 ) -> list[DocumentListItem]:
     """Keyset page filtered by BOTH access axes inside the query (#25/#27)."""
     stmt = (
@@ -335,8 +340,11 @@ async def _fetch_document_page(
             func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK) <= user.clearance_rank,
         )
         .order_by(Document.created_at.asc(), Document.id.asc())
-        .limit(limit_plus_one)
     )
+    if status is not None:
+        stmt = stmt.where(Document.status == status)
+    if level is not None:
+        stmt = stmt.where(SecurityLevel.name == level)
     if user.visible_department_ids:
         stmt = stmt.where(
             or_(
@@ -348,6 +356,8 @@ async def _fetch_document_page(
         stmt = stmt.where(Document.department_id.is_(None))
     if after is not None:
         stmt = stmt.where(tuple_(Document.created_at, Document.id) > after)
+    
+    stmt = stmt.limit(limit_plus_one)
     rows = (await session.execute(stmt)).all()
     return [
         DocumentListItem(
@@ -590,10 +600,15 @@ async def list_documents(
     sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None),
+    status: Literal[DOCUMENT_STATUSES] | None = Query(default=None),  # type: ignore[valid-type]
+    security_level: LevelName | None = Query(default=None),
 ) -> DocumentPage:
+    """Keyset pagination over documents. Cursor is an opaque token."""
     after = decode_cursor(cursor) if cursor is not None else None
     async with sessions(user.tenant_id) as session:
-        rows = await _fetch_document_page(session, user, after, limit + 1)
+        rows = await _fetch_document_page(
+            session, user, after, limit + 1, status=status, level=security_level
+        )
     has_more = len(rows) > limit
     page = rows[:limit]
     next_cursor = encode_cursor(page[-1].created_at, page[-1].id) if has_more and page else None
