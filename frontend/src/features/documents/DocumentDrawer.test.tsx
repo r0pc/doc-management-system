@@ -320,3 +320,48 @@ describe('DocumentDrawer — accessibility', () => {
     );
   });
 });
+describe('DocumentDrawer — failure visibility', () => {
+  it('renders the journal error reason for a failed stage', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === `/v1/documents/${DOC_ID}`) return Promise.resolve(jsonResponse(makeDocument({ id: DOC_ID, level: 'Internal' })));
+      if (url === `/v1/documents/${DOC_ID}/jobs`) return Promise.resolve(jsonResponse([
+        { stage: 'scan', state: 'succeeded', error: null, attempts: 1, started_at: '2026-08-31T10:00:00Z', finished_at: '2026-08-31T10:00:01Z' },
+        { stage: 'extract', state: 'failed', error: 'unsupported or malformed content', attempts: 1, started_at: '2026-08-31T10:00:01Z', finished_at: '2026-08-31T10:00:02Z' },
+      ]));
+      if (url === `/v1/documents/${DOC_ID}/findings`) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderWithProviders(<DocumentDrawer documentId={DOC_ID} onClose={() => {}} />);
+    expect(await screen.findByText('unsupported or malformed content')).toBeInTheDocument();
+  });
+
+  it('shows the attempt count when a stage was retried', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === `/v1/documents/${DOC_ID}`) return Promise.resolve(jsonResponse(makeDocument({ id: DOC_ID, level: 'Internal' })));
+      if (url === `/v1/documents/${DOC_ID}/jobs`) return Promise.resolve(jsonResponse([
+        { stage: 'scan', state: 'failed', error: 'transient failure in scan; retries exhausted', attempts: 3, started_at: '2026-08-31T10:00:00Z', finished_at: '2026-08-31T10:00:05Z' }
+      ]));
+      if (url === `/v1/documents/${DOC_ID}/findings`) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderWithProviders(<DocumentDrawer documentId={DOC_ID} onClose={() => {}} />);
+    expect(await screen.findByText(/3 attempts/i)).toBeInTheDocument();
+  });
+
+  it('does not render an error row for a clean journal', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === `/v1/documents/${DOC_ID}`) return Promise.resolve(jsonResponse(makeDocument({ id: DOC_ID, level: 'Internal' })));
+      if (url === `/v1/documents/${DOC_ID}/jobs`) return Promise.resolve(jsonResponse([
+        { stage: 'scan', state: 'succeeded', error: null, attempts: 1, started_at: '2026-08-31T10:00:00Z', finished_at: '2026-08-31T10:00:01Z' }
+      ]));
+      if (url === `/v1/documents/${DOC_ID}/findings`) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    renderWithProviders(<DocumentDrawer documentId={DOC_ID} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('scan')).toBeInTheDocument());
+    expect(screen.queryByTestId('job-error')).not.toBeInTheDocument();
+  });
+});

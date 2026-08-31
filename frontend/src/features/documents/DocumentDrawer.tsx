@@ -70,6 +70,8 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     queryKey: ['document', documentId],
     queryFn: () => api.get<DocumentListItem>(`/v1/documents/${documentId}`),
     enabled: !!documentId,
+    refetchInterval: (query: any) =>
+      query.state?.data?.status === 'processing' ? 2000 : false,
   });
 
   const { data: findings } = useQuery({
@@ -88,6 +90,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     queryKey: ['document', documentId, 'jobs'],
     queryFn: () => api.get<JobOut[]>(`/v1/documents/${documentId}/jobs`),
     enabled: !!documentId,
+    refetchInterval: doc?.status === 'processing' ? 2000 : false,
   });
 
   const handleDownload = async () => {
@@ -370,25 +373,40 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                       {jobs.map((j, i) => (
                         <div
                           key={i}
-                          className="p-2.5 bg-white dark:bg-[#0d1117] flex items-center justify-between text-xs"
+                          className="p-2.5 bg-white dark:bg-[#0d1117] flex flex-col text-xs"
                         >
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`w-2 h-2 rounded-full ${
-                                j.state === 'succeeded'
-                                  ? 'bg-[#1a7f37] dark:bg-[#3fb950]'
-                                  : j.state === 'failed'
-                                  ? 'bg-[#cf222e] dark:bg-[#f85149]'
-                                  : 'bg-[#9a6700] dark:bg-[#d29922]'
-                              }`}
-                            />
-                            <span className="font-mono text-[#1f2328] dark:text-[#e6edf3]">
-                              {j.stage}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-2 h-2 rounded-full ${
+                                  j.state === 'succeeded'
+                                    ? 'bg-[#1a7f37] dark:bg-[#3fb950]'
+                                    : j.state === 'failed'
+                                    ? 'bg-[#cf222e] dark:bg-[#f85149]'
+                                    : 'bg-[#9a6700] dark:bg-[#d29922]'
+                                }`}
+                              />
+                              <span className="font-mono text-[#1f2328] dark:text-[#e6edf3]">
+                                {j.stage}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-[#656d76] dark:text-[#848d97]">
+                              {j.finished_at ? formatDate(j.finished_at) : j.state}
                             </span>
                           </div>
-                          <span className="text-[11px] text-[#656d76] dark:text-[#848d97]">
-                            {j.finished_at ? formatDate(j.finished_at) : j.state}
-                          </span>
+                          {j.error && (
+                            <div
+                              data-testid="job-error"
+                              className="mt-1.5 p-2 bg-[#ffebe9] dark:bg-[#490202] text-[#cf222e] dark:text-[#ff7b72] border border-[#ff8182]/40 rounded text-[11px] leading-relaxed break-words"
+                            >
+                              {j.error}
+                            </div>
+                          )}
+                          {j.attempts > 1 && (
+                            <div className="mt-1 text-[10px] text-[#656d76] dark:text-[#848d97]">
+                              {j.attempts} attempts
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

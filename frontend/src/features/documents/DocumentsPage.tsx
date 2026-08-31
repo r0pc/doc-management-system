@@ -58,6 +58,12 @@ export const DocumentsPage: React.FC = () => {
         limit: 50,
         cursor: currentCursor,
       }),
+    refetchInterval: (query: any) => {
+      const data = query.state?.data;
+      if (!data) return false;
+      const items = Array.isArray(data) ? data : data.items || [];
+      return items.some((doc: any) => doc.status === 'processing') ? 2000 : false;
+    },
   });
 
   const documents: any[] = Array.isArray(documentsData)
