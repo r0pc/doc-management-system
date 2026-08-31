@@ -211,7 +211,7 @@ def client_factory(
         app = build_app(monkeypatch, settings_override, blob_storage, user=user)
         return TestClient(app, **client_kwargs)
 
-    def with_ready_document() -> tuple[TestClient, uuid.UUID]:
+    def with_document(blob_key: str | None = None, status: str = "ready") -> tuple[TestClient, uuid.UUID]:
         client = make(user=make_user())
         doc_id = uuid.uuid4()
         from app.api.v1.documents import DocumentView
@@ -220,6 +220,33 @@ def client_factory(
             return DocumentView(
                 id=doc_id,
                 tenant_id=TENANT_A,
+                department_id=None,
+                level_rank=1,
+                deleted_at=None,
+                status=status,
+                original_filename="a.pdf",
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                level_name="public",
+                doc_type_name=None,
+                blob_key=blob_key,
+                blob_mime="application/pdf",
+                blob_size=10,
+                current_version_id=uuid.uuid4(),
+            )
+        monkeypatch.setattr("app.api.v1.documents._fetch_document_view", fake_view)
+        return client, doc_id
+
+    def with_ready_document() -> tuple[TestClient, uuid.UUID]:
+        return with_document(blob_key="docs-primary/t/ab/abc", status="ready")
+
+    def foreign_document_id() -> uuid.UUID:
+        doc_id = uuid.uuid4()
+        from app.api.v1.documents import DocumentView
+        from datetime import UTC, datetime
+        async def fake_view(*a: Any, **k: Any) -> DocumentView:
+            return DocumentView(
+                id=doc_id,
+                tenant_id=TENANT_B,
                 department_id=None,
                 level_rank=1,
                 deleted_at=None,
@@ -234,9 +261,11 @@ def client_factory(
                 current_version_id=uuid.uuid4(),
             )
         monkeypatch.setattr("app.api.v1.documents._fetch_document_view", fake_view)
-        return client, doc_id
+        return doc_id
 
     make.with_ready_document = with_ready_document  # type: ignore[attr-defined]
+    make.with_document = with_document  # type: ignore[attr-defined]
+    make.foreign_document_id = foreign_document_id  # type: ignore[attr-defined]
 
     return make
 
