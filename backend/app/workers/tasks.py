@@ -489,6 +489,20 @@ def _run_stage(
         journal.mark_failed(job_row_id, "configuration refuses this stage (fail-closed)")
         mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
+    except Exception as unexpected:
+        # #4 backstop. The ladder above names every failure we can classify;
+        # anything else still has to leave the pipeline answerable from SQL.
+        # Without this, an unlisted exception unwinds past the journal and pins
+        # the job at 'running' and the document at 'processing' forever.
+        #
+        # The reason is the exception TYPE only. Exception payloads routinely
+        # carry document content (parser errors quote the offending bytes), and
+        # the journal is read back into the UI — safety rail: never log or
+        # persist document text.
+        journal.mark_failed(job_row_id, f"unexpected {type(unexpected).__name__} in {stage}")
+        mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
+        logger.exception("stage_unexpected_failure", extra=_ids(stage, ctx))
+        raise
     journal.mark_succeeded(job_row_id)
     logger.info("stage_complete", extra=_ids(stage, ctx))
     return ctx
