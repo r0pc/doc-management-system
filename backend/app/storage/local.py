@@ -155,25 +155,28 @@ class LocalStorage(PrimaryBlobGuard):
             raise ValueError(msg)
         return io.BufferedReader(RangeFile(handle, start, end))
 
-    def presign(self, key: str, ttl: int, *, filename: str) -> str:
-        """Dev HMAC URL with filename parameter."""
+    def presign(self, key: str, ttl: int, *, filename: str, method: str = "GET") -> str:
+        """Dev HMAC URL. The method is signed: a GET credential is not a PUT one."""
         expires = int(time.time()) + clamp_presign_ttl(ttl)
-        signature = hmac.new(self._secret, f"{key}:{expires}".encode(), hashlib.sha256).hexdigest()
+        signature = self._sign(key, expires, method)
         encoded_name = quote(filename, safe="")
-        url = (
+        return (
             f"{DEV_PRESIGN_BASE_URL}{quote(key, safe='')}"
             f"?expires={expires}&sig={signature}&filename={encoded_name}"
         )
-        return url
 
-    def verify_presign(self, key: str, expires: int, sig: str, now: float | None = None) -> bool:
+    def _sign(self, key: str, expires: int, method: str) -> str:
+        payload = f"{method.upper()}:{key}:{int(expires)}".encode()
+        return hmac.new(self._secret, payload, hashlib.sha256).hexdigest()
+
+    def verify_presign(
+        self, key: str, expires: int, sig: str, *, method: str, now: float | None = None
+    ) -> bool:
         """Constant-time check of a dev presign; False once expired."""
         current = time.time() if now is None else now
         if expires <= current:
             return False
-        expected = hmac.new(
-            self._secret, f"{key}:{int(expires)}".encode(), hashlib.sha256
-        ).hexdigest()
+        expected = self._sign(key, expires, method)
         return hmac.compare_digest(expected, sig)
 
     def delete(self, key: str) -> None:

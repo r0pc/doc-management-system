@@ -50,16 +50,30 @@ async def get_dev_object(
     key: str,
     expires: int,
     sig: str,
+    filename: str | None = None,
     storage: Storage = Depends(deps.get_storage),
 ) -> StreamingResponse:
     verify = getattr(storage, "verify_presign", None)
-    if not callable(verify) or not verify(key, expires, sig, now=_now()):
+    if not callable(verify) or not verify(key, expires, sig, method="GET", now=_now()):
         raise HTTPException(HTTP_403_FORBIDDEN, "invalid or expired signature")
     handle = storage.open(key)
+    media_type = "application/octet-stream"
+    try:
+        from app.extraction.sniff import sniff_mime
+
+        head = handle.read(4096)
+        handle.seek(0)
+        media_type = sniff_mime(head)
+    except (OSError, ValueError):
+        media_type = "application/octet-stream"
+    headers: dict[str, str] = {"Content-Length": str(_content_length(handle))}
+    if filename:
+        safe_name = filename.replace('"', "")
+        headers["Content-Disposition"] = f'inline; filename="{safe_name}"'
     return StreamingResponse(
         _stream_handle(handle),
-        media_type="application/octet-stream",
-        headers={"Content-Length": str(_content_length(handle))},
+        media_type=media_type,
+        headers=headers,
     )
 
 
@@ -72,7 +86,7 @@ async def put_dev_object(
     storage: Storage = Depends(deps.get_storage),
 ) -> Response:
     verify = getattr(storage, "verify_presign", None)
-    if not callable(verify) or not verify(key, expires, sig, now=_now()):
+    if not callable(verify) or not verify(key, expires, sig, method="PUT", now=_now()):
         raise HTTPException(HTTP_403_FORBIDDEN, "invalid or expired signature")
     # Bounded read: this stands in for the object store's own upload limit, so
     # a dev PUT cannot buffer an unbounded body into the API process.

@@ -223,7 +223,7 @@ async def create_upload_intent(
             url = upload.url
             fields = upload.fields
         else:
-            url = storage.presign(key, ttl, filename=payload.filename)
+            url = storage.presign(key, ttl, filename=payload.filename, method="PUT")
         await deps.record_audit(
             session,
             tenant_id=user.tenant_id,

@@ -104,7 +104,7 @@ def test_presign_clamps_high_ttl_and_signs_key_and_expiry(local_storage, local_s
     query = parse_qs(urlsplit(url).query)
     expires = int(query["expires"][0])
     assert expires == int(FIXED_NOW) + 120  # clamped down from 3600
-    expected_sig = hmac.new(local_secret, f"{key}:{expires}".encode(), hashlib.sha256).hexdigest()
+    expected_sig = hmac.new(local_secret, f"GET:{key}:{expires}".encode(), hashlib.sha256).hexdigest()
     assert query["sig"][0] == expected_sig
 
 
@@ -123,10 +123,10 @@ def test_verify_presign_accepts_valid_and_rejects_tampered(
     url = local_storage.presign(key, ttl=90, filename="t.txt")
     query = parse_qs(urlsplit(url).query)
     expires, sig = int(query["expires"][0]), query["sig"][0]
-    assert local_storage.verify_presign(key, expires, sig) is True
-    assert local_storage.verify_presign(key, expires, "0" * 64) is False
-    wrong_key_sig = hmac.new(local_secret, f"other:{expires}".encode(), hashlib.sha256).hexdigest()
-    assert local_storage.verify_presign(key, expires, wrong_key_sig) is False
+    assert local_storage.verify_presign(key, expires, sig, method="GET") is True
+    assert local_storage.verify_presign(key, expires, "0" * 64, method="GET") is False
+    wrong_key_sig = hmac.new(local_secret, f"GET:other:{expires}".encode(), hashlib.sha256).hexdigest()
+    assert local_storage.verify_presign(key, expires, wrong_key_sig, method="GET") is False
 
 
 def test_verify_presign_rejects_expired_signature(local_storage, monkeypatch):
@@ -135,5 +135,5 @@ def test_verify_presign_rejects_expired_signature(local_storage, monkeypatch):
     url = local_storage.presign(key, ttl=60, filename="d.bin")
     query = parse_qs(urlsplit(url).query)
     expires, sig = int(query["expires"][0]), query["sig"][0]
-    assert local_storage.verify_presign(key, expires, sig, now=FIXED_NOW + 59) is True
-    assert local_storage.verify_presign(key, expires, sig, now=FIXED_NOW + 61) is False
+    assert local_storage.verify_presign(key, expires, sig, method="GET", now=FIXED_NOW + 59) is True
+    assert local_storage.verify_presign(key, expires, sig, method="GET", now=FIXED_NOW + 61) is False
