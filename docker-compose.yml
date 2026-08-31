@@ -75,6 +75,9 @@ services:
     volumes:
       # Persist signature DB so restarts skip the multi-minute freshclam download.
       - clamavdb:/var/lib/clamav
+      # Stock StreamMaxLength (25M) sits below the app's 100 MiB upload cap;
+      # this raises it to match (see backend/tests/test_scan_limits.py).
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
     healthcheck:
       # clamdscan --ping=1 exits 0 once clamd accepts connections. First boot
       # downloads signatures for minutes; start_period tolerates that and api/
