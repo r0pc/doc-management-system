@@ -81,6 +81,8 @@ backend/app/
   workers/           celery_app.py, tasks.py, jobs.py
 frontend/src/
   api/ features/{documents,review,upload,audit,admin}/ components/ lib/
+docker/clamav/
+  clamd.conf         # ClamAV configuration mount
 ```
 
 The API and the Celery worker are **one codebase and one image**, differing only in entrypoint. Both import `domain/`. Never create a worker-local copy of policy or classification logic.

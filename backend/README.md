@@ -111,3 +111,8 @@ backend/app/
 | `upload_max_bytes` | `int` | `104857600` | Maximum upload size in bytes (100 MiB default) |
 | `presign_ttl_seconds`| `int` | `90` | Presigned URL expiration (clamped to 60–120s) |
 | `dev_jwt_secret` | `str` | `...` | Secret for dev JWT verification |
+| `upload_presign_ttl_seconds` | `int` | `900` | Presigned upload URL expiration (clamped to 60–900s) |
+| `docmgmt_local_storage_root` | `str` | `"var/storage"` | Root path for local storage when `STORAGE_BACKEND=local` |
+
+### Infrastructure
+- **`docker/clamav/clamd.conf`**: Custom ClamAV configuration mounted to increase `StreamMaxLength` (100M) and `MaxScanSize` (150M) to match application upload limits.
