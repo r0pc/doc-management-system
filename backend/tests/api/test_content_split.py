@@ -257,3 +257,42 @@ def test_dev_storage_missing_object_is_canonical_404(client: Any, seeded_blob: A
     response = client.get(_presign_path(seeded_blob, key))
     assert response.status_code == 404
     assert response.content == not_found().body
+
+
+def test_view_inline_streams_with_content_disposition(
+    client_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_blob: Any,
+) -> None:
+    install_view(monkeypatch, make_view(level_rank=4, level_name="restricted"))
+    client = client_factory(user=make_user(clearance_rank=4))
+    response = client.get(f"/v1/documents/{DOC_ID}/view")
+    assert response.status_code == 200
+    assert response.content == PAYLOAD
+    assert "inline" in response.headers["content-disposition"]
+
+
+def test_preview_endpoint_returns_justification(
+    client_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_blob: Any,
+) -> None:
+    install_view(monkeypatch, make_view(level_rank=2, level_name="internal"))
+
+    async def fake_findings(session: Any, document_id: Any) -> list[Any]:
+        return []
+
+    async def fake_keywords(session: Any, document_id: Any) -> list[str]:
+        return ["report", "finance"]
+
+    monkeypatch.setattr("app.api.v1.documents._fetch_findings", fake_findings)
+    monkeypatch.setattr("app.api.v1.documents._fetch_keywords", fake_keywords)
+
+    client = client_factory(user=make_user(clearance_rank=2))
+    response = client.get(f"/v1/documents/{DOC_ID}/preview")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(DOC_ID)
+    assert data["justification"]["level"] == "internal"
+    assert "Internal: Default floor" in data["justification"]["level_reason"]
+    assert data["justification"]["keywords"] == ["report", "finance"]
