@@ -51,7 +51,7 @@ export const UploadPage: React.FC = () => {
       }
       setFile(selected);
       if (!title) {
-        setTitle(selected.name.replace(/\.[^/.]+$/, ''));
+        setTitle(selected.name);
       }
       setError(null);
     }
@@ -77,9 +77,16 @@ export const UploadPage: React.FC = () => {
       // this value is a transport declaration, not a trusted classification.
       const contentType = file.type || 'application/octet-stream';
 
+      // Ensure file extension is preserved even if user edited the title
+      let uploadFilename = title.trim() || file.name;
+      const fileExt = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+      if (fileExt && !uploadFilename.toLowerCase().endsWith(fileExt.toLowerCase())) {
+        uploadFilename = `${uploadFilename}${fileExt}`;
+      }
+
       // Step 1: Request Upload Intent (Invariant #1)
       const intent = await api.post<UploadIntentResponse>('/v1/uploads', {
-        filename: title || file.name,
+        filename: uploadFilename,
         size_bytes: file.size,
         content_type: contentType,
       });
@@ -92,7 +99,7 @@ export const UploadPage: React.FC = () => {
       // The file body goes browser -> storage. It never passes through `api.post`
       // and never reaches the API origin.
       setUploadStage('uploading');
-      await api.putDirect(intent.presigned_put.url, file, contentType, (percent) =>
+      await api.putDirect(intent.presigned_put.url, file, contentType, intent.presigned_put.fields, (percent) =>
         setUploadProgress(percent)
       );
 

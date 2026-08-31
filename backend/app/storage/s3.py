@@ -7,13 +7,13 @@ botocore, for 404 detection in the immutability pre-check (#16).
 
 from __future__ import annotations
 
-from typing import BinaryIO, Final, Protocol, TypedDict
+from typing import Any, BinaryIO, Final, Protocol, TypedDict
 
 # botocore ships no py.typed/stubs and pyproject edits are out of scope this
 # wave; this narrow ignore is the documented exception (mypy strict otherwise).
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
-from app.storage.base import ByteStream, PrimaryBlobGuard, clamp_presign_ttl
+from app.storage.base import ByteStream, PresignedUpload, PrimaryBlobGuard, clamp_presign_ttl
 from app.storage.keys import DEFAULT_BUCKET_PREFIX, bucket_name, key_kind
 
 
@@ -68,6 +68,15 @@ class S3Client(Protocol):
         Params: dict[str, str],  # noqa: N803
         ExpiresIn: int,  # noqa: N803
     ) -> str: ...
+
+    def generate_presigned_post(
+        self,
+        Bucket: str,  # noqa: N803
+        Key: str,  # noqa: N803
+        Fields: dict[str, str],  # noqa: N803
+        Conditions: list[dict[str, str] | list[str | int]],  # noqa: N803
+        ExpiresIn: int,  # noqa: N803
+    ) -> dict[str, Any]: ...
 
 
 _NOT_FOUND_CODES: Final[frozenset[str]] = frozenset({"404", "NoSuchKey", "NotFound"})
@@ -144,17 +153,26 @@ class S3Storage(PrimaryBlobGuard):
             ExpiresIn=clamp_presign_ttl(ttl),
         )
 
-    def presign_put(self, key: str, ttl: int, *, content_type: str) -> str:
-        """Presigned direct-PUT upload URL (Wave 3.B flow); ttl clamped 60..120."""
-        return self._client.generate_presigned_url(
-            ClientMethod="put_object",
-            Params={
-                "Bucket": self._bucket_for(key),
-                "Key": key,
-                "ContentType": content_type,
-            },
+    def presign_put(
+        self, key: str, ttl: int, *, content_type: str, max_bytes: int
+    ) -> PresignedUpload:
+        """Presigned direct upload with a storage-enforced size ceiling.
+
+        A presigned PUT URL cannot express a size limit, so this issues a
+        presigned POST policy instead: content-length-range is evaluated by the
+        storage service, which is the only enforcement a client cannot bypass.
+        """
+        signed = self._client.generate_presigned_post(
+            Bucket=self._bucket_for(key),
+            Key=key,
+            Fields={"Content-Type": content_type},
+            Conditions=[
+                {"Content-Type": content_type},
+                ["content-length-range", 1, max_bytes],
+            ],
             ExpiresIn=clamp_presign_ttl(ttl),
         )
+        return PresignedUpload(url=signed["url"], fields=signed["fields"])
 
     def delete(self, key: str) -> None:
         self.require_mutable(key)

@@ -4,6 +4,7 @@ export type DocumentStatus = 'quarantined' | 'processing' | 'ready' | 'failed' |
 
 export interface PresignedPut {
   url: string;
+  fields: Record<string, string>;
   expires_at: string;
 }
 
@@ -39,6 +40,36 @@ export interface FindingOut {
   char_start: number;
   char_end: number;
   score: number;
+  line_no?: number | null;
+  snippet?: string | null;
+  contributed_level?: string | null;
+}
+
+export interface PageTextOut {
+  page_no: number;
+  text: string;
+}
+
+export interface ClassificationJustification {
+  level: string;
+  level_rank: number;
+  level_reason: string;
+  doc_type: string | null;
+  decided_by: string;
+  confidence: number | null;
+  confidence_threshold: number;
+  keywords: string[];
+  findings: FindingOut[];
+}
+
+export interface DocumentPreviewOut {
+  id: string;
+  filename: string;
+  mime: string | null;
+  char_count: number;
+  pages: PageTextOut[];
+  full_text: string;
+  justification: ClassificationJustification;
 }
 
 export interface JobOut {

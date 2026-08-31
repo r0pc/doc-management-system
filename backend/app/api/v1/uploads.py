@@ -72,6 +72,7 @@ class CompleteRequest(BaseModel):
 
 class PresignedPut(BaseModel):
     url: str
+    fields: dict[str, str] = Field(default_factory=dict)
     expires_at: datetime
 
 
@@ -211,8 +212,16 @@ async def create_upload_intent(
         # S3 backends expose a real presigned PUT; local dev falls back to
         # its HMAC GET URL (single call site - inlined by the one-off rule).
         presign_put = getattr(storage, "presign_put", None)
+        fields: dict[str, str] = {}
         if callable(presign_put):
-            url: str = presign_put(key, ttl, content_type=payload.content_type)
+            upload = presign_put(
+                key,
+                ttl,
+                content_type=payload.content_type,
+                max_bytes=settings.upload_max_bytes,
+            )
+            url = upload.url
+            fields = upload.fields
         else:
             url = storage.presign(key, ttl, filename=payload.filename)
         await deps.record_audit(
@@ -227,7 +236,9 @@ async def create_upload_intent(
     return UploadIntentResponse(
         upload_id=document_id,
         presigned_put=PresignedPut(
-            url=url, expires_at=datetime.now(tz=UTC) + timedelta(seconds=ttl)
+            url=url,
+            fields=fields,
+            expires_at=datetime.now(tz=UTC) + timedelta(seconds=ttl),
         ),
     )
 

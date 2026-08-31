@@ -90,7 +90,7 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
         return Promise.resolve(
           jsonResponse({
             upload_id: 'up-1',
-            presigned_put: { url: PRESIGNED_URL, expires_at: '2026-08-28T00:01:30Z' },
+            presigned_put: { url: PRESIGNED_URL, fields: {}, expires_at: '2026-08-28T00:01:30Z' },
           })
         );
       }
@@ -149,7 +149,7 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
         return Promise.resolve(
           jsonResponse({
             upload_id: 'up-1',
-            presigned_put: { url: PRESIGNED_URL, expires_at: 'x' },
+            presigned_put: { url: PRESIGNED_URL, fields: {}, expires_at: 'x' },
           })
         );
       }
@@ -175,7 +175,7 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve(
         url === '/v1/uploads'
-          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, expires_at: 'x' } })
+          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, fields: {}, expires_at: 'x' } })
           : jsonResponse({ document_id: 'd', version_id: 'v', status: 'ok' })
       )
     );
@@ -196,7 +196,7 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve(
         url === '/v1/uploads'
-          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, expires_at: 'x' } })
+          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, fields: {}, expires_at: 'x' } })
           : jsonResponse({ document_id: 'd', version_id: 'v', status: 'ok' })
       )
     );
@@ -208,7 +208,7 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
 
     const intent = apiJsonBodies()[0] as Record<string, unknown>;
     expect(Object.keys(intent).sort()).toEqual(['content_type', 'filename', 'size_bytes']);
-    expect(intent.filename).toBe('msa');
+    expect(intent.filename).toBe('msa.pdf');
     expect(typeof intent.size_bytes).toBe('number');
   });
 });
@@ -238,7 +238,7 @@ describe('UploadPage — failure handling', () => {
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve(
         url === '/v1/uploads'
-          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, expires_at: 'x' } })
+          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, fields: {}, expires_at: 'x' } })
           : jsonResponse({ document_id: 'd', version_id: 'v', status: 'ok' })
       )
     );
@@ -296,7 +296,7 @@ describe('UploadPage — form accessibility', () => {
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve(
         url === '/v1/uploads'
-          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, expires_at: 'x' } })
+          ? jsonResponse({ upload_id: 'up-1', presigned_put: { url: PRESIGNED_URL, fields: {}, expires_at: 'x' } })
           : jsonResponse({ document_id: 'd', version_id: 'v', status: 'ok' })
       )
     );

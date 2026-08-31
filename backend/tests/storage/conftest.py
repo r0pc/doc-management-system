@@ -119,6 +119,27 @@ class FakeS3Client:
         key = Params.get("Key", "")
         return f"https://fake.s3.local/{bucket}/{key}?method={ClientMethod}&expires_in={ExpiresIn}"
 
+    def generate_presigned_post(
+        self,
+        Bucket: str,  # noqa: N803
+        Key: str,  # noqa: N803
+        Fields: dict[str, str],  # noqa: N803
+        Conditions: list[dict[str, str] | list[str | int]],  # noqa: N803
+        ExpiresIn: int,  # noqa: N803
+    ) -> dict[str, object]:
+        self._record(
+            "generate_presigned_post",
+            Bucket=Bucket,
+            Key=Key,
+            Fields=Fields,
+            Conditions=Conditions,
+            ExpiresIn=ExpiresIn,
+        )
+        return {
+            "url": f"https://fake.s3.local/{Bucket}/{Key}",
+            "fields": Fields,
+        }
+
 
 @pytest.fixture
 def local_secret() -> bytes:

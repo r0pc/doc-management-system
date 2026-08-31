@@ -339,7 +339,7 @@ describe('putDirect — invariant #1 (browser to storage, no broker)', () => {
     setAuthToken('token-abc');
     const blob = new Blob(['file bytes']);
 
-    const promise = api.putDirect('https://minio.local/quarantine/abc?sig=xyz', blob, 'application/pdf');
+    const promise = api.putDirect('https://minio.local/quarantine/abc?sig=xyz', blob, 'application/pdf', {});
     const xhr = FakeXhr.instances[0];
     xhr.status = 200;
     xhr.onload?.();
@@ -357,9 +357,24 @@ describe('putDirect — invariant #1 (browser to storage, no broker)', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('POSTs the body as FormData when fields are present', async () => {
+    setAuthToken('token-abc');
+    const blob = new Blob(['file bytes']);
+
+    const promise = api.putDirect('https://minio.local/quarantine/abc?sig=xyz', blob, 'application/pdf', { 'x-amz-credential': '123' });
+    const xhr = FakeXhr.instances[0];
+    xhr.status = 200;
+    xhr.onload?.();
+    await promise;
+
+    expect(xhr.method).toBe('POST');
+    expect(xhr.url).toBe('https://minio.local/quarantine/abc?sig=xyz');
+    expect(xhr.sent).toBeInstanceOf(FormData);
+  });
+
   it('reports progress from upload events', async () => {
     const seen: number[] = [];
-    const promise = api.putDirect('https://minio.local/x', new Blob(['a']), 'application/pdf', (p) =>
+    const promise = api.putDirect('https://minio.local/x', new Blob(['a']), 'application/pdf', {}, (p) =>
       seen.push(p)
     );
     const xhr = FakeXhr.instances[0];
@@ -373,7 +388,7 @@ describe('putDirect — invariant #1 (browser to storage, no broker)', () => {
   });
 
   it('rejects with an ApiError carrying the storage status', async () => {
-    const promise = api.putDirect('https://minio.local/x', new Blob(['a']), 'application/pdf');
+    const promise = api.putDirect('https://minio.local/x', new Blob(['a']), 'application/pdf', {});
     const xhr = FakeXhr.instances[0];
     xhr.status = 403;
     xhr.onload?.();
@@ -385,7 +400,7 @@ describe('putDirect — invariant #1 (browser to storage, no broker)', () => {
   });
 
   it('rejects on a network error rather than hanging', async () => {
-    const promise = api.putDirect('https://minio.local/x', new Blob(['a']), 'application/pdf');
+    const promise = api.putDirect('https://minio.local/x', new Blob(['a']), 'application/pdf', {});
     FakeXhr.instances[0].onerror?.();
 
     const err = await captureApiError(promise);

@@ -213,17 +213,30 @@ export const api = {
     url: string,
     file: Blob | ArrayBuffer,
     contentType: string,
+    fields: Record<string, string>,
     onProgress?: (percent: number) => void
   ): Promise<void> => {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('PUT', url, true);
+      const isPost = Object.keys(fields).length > 0;
+      xhr.open(isPost ? 'POST' : 'PUT', url, true);
       // Invariant #1: the bytes go browser -> object storage. No Authorization
       // header and no cookies are attached here — the presigned URL IS the
       // credential, and adding a second one would leak the session to the
       // storage host and break the signature on strict S3 implementations.
       xhr.withCredentials = false;
-      xhr.setRequestHeader('Content-Type', contentType);
+
+      let data: FormData | Blob | ArrayBuffer = file;
+      if (isPost) {
+        data = new FormData();
+        for (const [key, value] of Object.entries(fields)) {
+          data.append(key, value);
+        }
+        // The file must be the last field in the form data
+        data.append('file', file instanceof ArrayBuffer ? new Blob([file], { type: contentType }) : file);
+      } else {
+        xhr.setRequestHeader('Content-Type', contentType);
+      }
 
       if (xhr.upload && onProgress) {
         xhr.upload.onprogress = (e) => {
@@ -246,7 +259,7 @@ export const api = {
         reject(new ApiError(0, 'Storage upload network error'));
       };
 
-      xhr.send(file);
+      xhr.send(data);
     });
   },
 
@@ -307,6 +320,55 @@ export const api = {
         `document-${documentId}`
       ),
       redirected: response.redirected === true,
+    };
+  },
+
+  /**
+   * Inline document content fetcher for browser viewing (Action.PREVIEW).
+   * Separate endpoint from download (Invariant #18).
+   */
+  fetchDocumentView: async (
+    documentId: string
+  ): Promise<{ blob: Blob; filename: string; contentType: string }> => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`/v1/documents/${documentId}/view`, {
+      method: 'GET',
+      headers,
+      redirect: 'follow',
+    });
+
+    if (!response.ok) {
+      let problem: ProblemDetails | undefined;
+      try {
+        const data = await response.json();
+        if (data && typeof data === 'object') {
+          problem = data as ProblemDetails;
+        }
+      } catch {
+        // Non-JSON error body
+      }
+      throw new ApiError(
+        response.status,
+        problem?.detail || problem?.title || `Failed to open document (${response.status})`,
+        problem
+      );
+    }
+
+    const rawBlob = await response.blob();
+    const contentType = response.headers.get('Content-Type') || rawBlob.type || 'application/octet-stream';
+    const blob = new Blob([rawBlob], { type: contentType });
+    return {
+      blob,
+      filename: parseContentDispositionFilename(
+        response.headers.get('Content-Disposition'),
+        `document-${documentId}`
+      ),
+      contentType,
     };
   },
 };

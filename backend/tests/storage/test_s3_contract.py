@@ -92,14 +92,16 @@ def test_presign_get_clamps_low_ttl_upward(s3_storage, fake_s3):
 
 def test_presign_put_records_content_type_and_respects_window(s3_storage, fake_s3):
     key = quarantine_key(TENANT_ID, UPLOAD_ID)
-    url = s3_storage.presign_put(key, ttl=90, content_type="application/pdf")
-    call = fake_s3.calls_to("generate_presigned_url")[0]
-    assert call["ClientMethod"] == "put_object"
-    assert call["ExpiresIn"] == 90  # inside the window, unchanged
-    params = call["Params"]
-    assert isinstance(params, dict)
-    assert params["ContentType"] == "application/pdf"
-    assert url.startswith("https://fake.s3.local/")
+    url = s3_storage.presign_put(key, ttl=90, content_type="application/pdf", max_bytes=1024)
+    # The client method receives the clamped ttl
+    call = fake_s3.calls_to("generate_presigned_post")[0]
+    assert call["ExpiresIn"] == 90
+    assert call["Bucket"] == bucket_name("quarantine")
+    assert call["Key"] == key
+    fields = call["Fields"]
+    assert isinstance(fields, dict)
+    assert fields["Content-Type"] == "application/pdf"
+    assert url.url.startswith("https://fake.s3.local/")
 
 
 def test_delete_primary_raises_without_touching_client(s3_storage, fake_s3):

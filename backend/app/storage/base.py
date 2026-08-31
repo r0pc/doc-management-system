@@ -56,6 +56,18 @@ class ObjectStat:
     size_bytes: int
 
 
+@dataclass(frozen=True)
+class PresignedUpload:
+    """A presigned POST policy for direct upload.
+
+    Unlike presigned PUTs, POST policies can enforce conditions (like size)
+    at the storage layer before bytes are written.
+    """
+
+    url: str
+    fields: dict[str, str]
+
+
 class Storage(Protocol):
     """Backend-neutral object storage surface (invariant #15: permission lives
     on the documents row; the object key is never an authorisation boundary)."""
@@ -78,6 +90,12 @@ class Storage(Protocol):
 
     def presign(self, key: str, ttl: int, *, filename: str) -> str:
         """Presigned GET download URL; ttl clamped to [60, 120] seconds."""
+        ...
+
+    def presign_put(
+        self, key: str, ttl: int, *, content_type: str, max_bytes: int
+    ) -> PresignedUpload:
+        """Presigned direct upload with a storage-enforced size ceiling."""
         ...
 
     def delete(self, key: str) -> None:
