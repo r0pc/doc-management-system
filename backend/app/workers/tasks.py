@@ -28,7 +28,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, TypedDict, TypeVar
+from typing import Any, Protocol, TypedDict, TypeVar
 
 from celery import chain
 from celery.exceptions import Ignore
@@ -417,6 +417,8 @@ def _run_stage(
     ctx: PipelineCtx,
     body: Callable[[], None],
     requires: tuple[str, ...] = (),
+    *,
+    attempt_is_final: bool = False,
 ) -> PipelineCtx:
     """Guard + journal lifecycle around one stage body; owns the failure map.
 
@@ -425,6 +427,11 @@ def _run_stage(
     eager mode, where celery swallows :class:`Ignore` instead of unwinding the
     canvas. On real workers Ignore alone halts the chain; this gate is the
     second line of defence, answered from processing_jobs like every guard.
+
+    ``attempt_is_final`` tells this frame whether celery has another retry left.
+    A transient failure mid-retry must NOT flip the document out of
+    'processing' (the pipeline is still live), but the last attempt must, or
+    the row is stranded at 'processing' with a 'failed' job beside it.
     """
     journal = _journal()
     version_id = uuid.UUID(ctx["version_id"])
@@ -483,7 +490,11 @@ def _run_stage(
         mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise
     except TransientStorageError:
-        journal.mark_failed(job_row_id, f"transient failure in {stage}; retry scheduled")
+        if attempt_is_final:
+            journal.mark_failed(job_row_id, f"transient failure in {stage}; retries exhausted")
+            mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
+        else:
+            journal.mark_failed(job_row_id, f"transient failure in {stage}; retry scheduled")
         raise
     except RuntimeError:
         journal.mark_failed(job_row_id, "configuration refuses this stage (fail-closed)")
@@ -508,34 +519,68 @@ def _run_stage(
     return ctx
 
 
-@pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
-def scan_for_malware(ctx: PipelineCtx) -> PipelineCtx:
-    return _run_stage("scan", ctx, lambda: _scan_body(ctx))
+@pipeline_task(bind=True, max_retries=3, autoretry_for=(TransientStorageError,))
+def scan_for_malware(self: Any, ctx: PipelineCtx) -> PipelineCtx:
+    return _run_stage(
+        "scan",
+        ctx,
+        lambda: _scan_body(ctx),
+        attempt_is_final=self.request.retries >= self.max_retries,
+    )
 
 
-@pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
-def extract_text(ctx: PipelineCtx) -> PipelineCtx:
-    return _run_stage("extract", ctx, lambda: _extract_body(ctx))
+@pipeline_task(bind=True, max_retries=3, autoretry_for=(TransientStorageError,))
+def extract_text(self: Any, ctx: PipelineCtx) -> PipelineCtx:
+    return _run_stage(
+        "extract",
+        ctx,
+        lambda: _extract_body(ctx),
+        attempt_is_final=self.request.retries >= self.max_retries,
+    )
 
 
-@pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
-def extract_keywords(ctx: PipelineCtx) -> PipelineCtx:
-    return _run_stage("keywords", ctx, lambda: _keywords_body(ctx), requires=("extract",))
+@pipeline_task(bind=True, max_retries=3, autoretry_for=(TransientStorageError,))
+def extract_keywords(self: Any, ctx: PipelineCtx) -> PipelineCtx:
+    return _run_stage(
+        "keywords",
+        ctx,
+        lambda: _keywords_body(ctx),
+        requires=("extract",),
+        attempt_is_final=self.request.retries >= self.max_retries,
+    )
 
 
-@pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
-def embed(ctx: PipelineCtx) -> PipelineCtx:
-    return _run_stage("embed", ctx, lambda: _embed_body(ctx), requires=("extract",))
+@pipeline_task(bind=True, max_retries=3, autoretry_for=(TransientStorageError,))
+def embed(self: Any, ctx: PipelineCtx) -> PipelineCtx:
+    return _run_stage(
+        "embed",
+        ctx,
+        lambda: _embed_body(ctx),
+        requires=("extract",),
+        attempt_is_final=self.request.retries >= self.max_retries,
+    )
 
 
-@pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
-def classify(ctx: PipelineCtx) -> PipelineCtx:
-    return _run_stage("classify", ctx, lambda: _classify_body(ctx), requires=("extract",))
+@pipeline_task(bind=True, max_retries=3, autoretry_for=(TransientStorageError,))
+def classify(self: Any, ctx: PipelineCtx) -> PipelineCtx:
+    return _run_stage(
+        "classify",
+        ctx,
+        lambda: _classify_body(ctx),
+        requires=("extract",),
+        attempt_is_final=self.request.retries >= self.max_retries,
+    )
 
 
-@pipeline_task(max_retries=3, autoretry_for=(TransientStorageError,))
-def build_index(ctx: PipelineCtx) -> PipelineCtx:
-    return _run_stage("index", ctx, lambda: _index_body(ctx), requires=("extract",))
+@pipeline_task(bind=True, max_retries=3, autoretry_for=(TransientStorageError,))
+def build_index(self: Any, ctx: PipelineCtx) -> PipelineCtx:
+    return _run_stage(
+        "index",
+        ctx,
+        lambda: _index_body(ctx),
+        requires=("extract",),
+        attempt_is_final=self.request.retries >= self.max_retries,
+    )
 
 
 @pipeline_task()
