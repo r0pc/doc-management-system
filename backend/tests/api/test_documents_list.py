@@ -38,6 +38,7 @@ def install_page_fake(
         user: Any,
         after: tuple[datetime, UUID] | None,
         limit_plus_one: int,
+        **kwargs: Any,
     ) -> list[DocumentListItem]:
         captured["after"] = after
         captured["limit_plus_one"] = limit_plus_one
