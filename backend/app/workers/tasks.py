@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypedDict, TypeVar
 
 from celery import chain
-from celery.exceptions import Ignore
+from celery.exceptions import Ignore, Retry
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -52,6 +52,7 @@ from app.workers.jobs import (
     get_sync_sessions,
     load_version_context,
     mark_document_failed,
+    mark_document_held,
     mark_document_ready,
     promote_blob_record,
     record_classification,
@@ -453,7 +454,11 @@ def _run_stage(
         logger.info("stage_skipped", extra={**_ids(stage, ctx), "reason": skip.reason})
         return ctx
     except NeedsOcrError:
-        journal.mark_skipped(job_row_id, "needs_tesseract")
+        # No OCR worker exists (enqueue_ocr only journals a queued row). Leaving
+        # the document at 'processing' hangs it forever with nothing that will
+        # ever pick it up, so give it the terminal 'held' state instead.
+        journal.mark_skipped(job_row_id, "needs_ocr")
+        mark_document_held(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
         raise Ignore() from None
     except MalwareDetectedError as detected:
         journal.mark_failed(job_row_id, f"malware detected: {detected.signature}")
@@ -499,6 +504,8 @@ def _run_stage(
     except RuntimeError:
         journal.mark_failed(job_row_id, "configuration refuses this stage (fail-closed)")
         mark_document_failed(_sessions(), document_id=uuid.UUID(ctx["document_id"]))
+        raise
+    except (Ignore, Retry):
         raise
     except Exception as unexpected:
         # #4 backstop. The ladder above names every failure we can classify;

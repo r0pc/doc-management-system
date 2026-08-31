@@ -110,6 +110,7 @@ export const DocumentsPage: React.FC = () => {
           <option value="">Status: All</option>
           <option value="ready">Ready</option>
           <option value="processing">Processing</option>
+          <option value="held">Held</option>
           <option value="quarantined">Quarantined</option>
           <option value="failed">Failed</option>
         </select>
@@ -199,7 +200,9 @@ export const DocumentsPage: React.FC = () => {
                           ? 'bg-[#dafbe1] dark:bg-[#238636]/25 text-[#1a7f37] dark:text-[#3fb950] border-[#4ac26b]/40'
                           : doc.status === 'failed'
                           ? 'bg-[#ffebe9] dark:bg-[#da3633]/25 text-[#cf222e] dark:text-[#f85149] border-[#ff8182]/40'
-                          : 'bg-[#fff8c5] dark:bg-[#9e6a03]/30 text-[#9a6700] dark:text-[#d29922] border-[#d4a72c]/40'
+                          : doc.status === 'held'
+                          ? 'bg-[#fff8c5] dark:bg-[#9e6a03]/30 text-[#9a6700] dark:text-[#d29922] border-[#d4a72c]/40'
+                          : 'bg-[#ddf4ff] dark:bg-[#388bfd]/25 text-[#0969da] dark:text-[#58a6ff] border-[#54aeff]/40'
                       }`}
                     >
                       {doc.status}

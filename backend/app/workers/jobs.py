@@ -433,3 +433,14 @@ def mark_document_failed(sessions: sessionmaker[Session], *, document_id: uuid.U
     """
     with sessions() as session, session.begin():
         session.execute(update(Document).where(Document.id == document_id).values(status="failed"))
+
+
+def mark_document_held(sessions: sessionmaker[Session], *, document_id: uuid.UUID) -> None:
+    """Terminal 'held' flip for a document blocked on a capability we lack.
+
+    'held' is distinct from 'failed': the document is intact and will process
+    once the missing capability (today: OCR) exists. Without this flip the row
+    sits at 'processing' forever with no worker that will ever pick it up (#4).
+    """
+    with sessions() as session, session.begin():
+        session.execute(update(Document).where(Document.id == document_id).values(status="held"))
