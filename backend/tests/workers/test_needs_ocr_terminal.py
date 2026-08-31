@@ -19,14 +19,14 @@ class _Journal:
         self.job_id = uuid.uuid4()
         self.terminal: tuple[str, str] | None = None
 
-    def mark_running(self, *a, **k):  # noqa: ANN001, ANN201, ARG002
+    def mark_running(self, *a, **k):
         return self.job_id
 
-    def mark_succeeded(self, *a, **k) -> None: ...  # noqa: ANN001, ARG002
-    def mark_failed(self, job_row_id, error) -> None:  # noqa: ANN001, ARG002
+    def mark_succeeded(self, *a, **k) -> None: ...
+    def mark_failed(self, job_row_id, error) -> None:
         self.terminal = ("failed", error)
 
-    def mark_skipped(self, job_row_id, reason) -> None:  # noqa: ANN001, ARG002
+    def mark_skipped(self, job_row_id, reason) -> None:
         self.terminal = ("skipped", reason)
 
 

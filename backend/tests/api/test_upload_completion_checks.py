@@ -33,7 +33,9 @@ def test_complete_rejects_when_no_object_was_ever_put(client: Any, _setup_comple
     assert "did not arrive" in response.json()["detail"]
 
 
-def test_complete_rejects_size_over_cap(client: Any, monkeypatch: pytest.MonkeyPatch, _setup_completion: None) -> None:
+def test_complete_rejects_size_over_cap(
+    client: Any, monkeypatch: pytest.MonkeyPatch, _setup_completion: None
+) -> None:
     from app.storage.base import ObjectStat
 
     monkeypatch.setattr(
@@ -44,7 +46,9 @@ def test_complete_rejects_size_over_cap(client: Any, monkeypatch: pytest.MonkeyP
     assert "upload cap" in response.json()["detail"]
 
 
-def test_complete_rejects_a_size_mismatch(client: Any, blob_storage: Any, _setup_completion: None) -> None:
+def test_complete_rejects_a_size_mismatch(
+    client: Any, blob_storage: Any, _setup_completion: None
+) -> None:
     key = quarantine_key(TENANT_A, DOC_ID)
     blob_storage.put(key, io.BytesIO(b"x" * 10), content_type="application/pdf")
     response = client.post(f"/v1/uploads/{DOC_ID}/complete", json={"size_bytes": 999})
@@ -52,7 +56,9 @@ def test_complete_rejects_a_size_mismatch(client: Any, blob_storage: Any, _setup
     assert "size" in response.json()["detail"]
 
 
-def test_complete_accepts_a_matching_object(client: Any, blob_storage: Any, _setup_completion: None) -> None:
+def test_complete_accepts_a_matching_object(
+    client: Any, blob_storage: Any, _setup_completion: None
+) -> None:
     key = quarantine_key(TENANT_A, DOC_ID)
     blob_storage.put(key, io.BytesIO(b"x" * 10), content_type="application/pdf")
     response = client.post(f"/v1/uploads/{DOC_ID}/complete", json={"size_bytes": 10})
@@ -60,7 +66,9 @@ def test_complete_accepts_a_matching_object(client: Any, blob_storage: Any, _set
     assert response.json()["status"] == "processing"
 
 
-def test_complete_never_reads_the_body(client: Any, blob_storage: Any, _setup_completion: None) -> None:
+def test_complete_never_reads_the_body(
+    client: Any, blob_storage: Any, _setup_completion: None
+) -> None:
     """#1: the API signs and records intent; it does not touch the bytes."""
     key = quarantine_key(TENANT_A, DOC_ID)
     blob_storage.put(key, io.BytesIO(b"x" * 10), content_type="application/pdf")

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.api.v1 import documents, uploads
+from app.api.v1 import documents
 from app.storage.base import BlobExistsError, ImmutableKeyError
 from tests.api.conftest import install_worker_fake, make_user
 
@@ -85,7 +85,6 @@ def test_unexpected_exception_is_sanitised_500(
 def _drive_with_raiser(client: Any, monkeypatch: pytest.MonkeyPatch, raiser: Any) -> Any:
     from app.storage.base import ObjectStat
     from tests.api.test_uploads import DOC_ID, patch_complete_persistence
-    from tests.api.conftest import install_worker_fake
 
     monkeypatch.setattr(
         "app.storage.local.LocalStorage.stat", lambda self, key: ObjectStat(size_bytes=10)

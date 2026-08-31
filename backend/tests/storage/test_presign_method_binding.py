@@ -15,7 +15,7 @@ from app.storage.local import LocalStorage
 
 
 @pytest.fixture
-def storage(tmp_path) -> LocalStorage:  # noqa: ANN001
+def storage(tmp_path) -> LocalStorage:
     return LocalStorage(tmp_path, signing_secret="s" * 32, bucket_prefix="docs-")
 
 

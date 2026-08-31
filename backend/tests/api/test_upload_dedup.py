@@ -9,10 +9,11 @@ from __future__ import annotations
 import uuid
 
 
-def test_detail_reports_a_sibling_with_the_same_content(client_factory, monkeypatch) -> None:  # noqa: ANN001
+def test_detail_reports_a_sibling_with_the_same_content(client_factory, monkeypatch) -> None:
     from app.api.v1 import documents
 
     sibling = uuid.uuid4()
+
     async def _mock_siblings(*a, **k):
         return [sibling]
 
@@ -22,7 +23,7 @@ def test_detail_reports_a_sibling_with_the_same_content(client_factory, monkeypa
     assert body.get("duplicate_of") == [str(sibling)]
 
 
-def test_detail_reports_no_duplicates_for_unique_content(client_factory, monkeypatch) -> None:  # noqa: ANN001
+def test_detail_reports_no_duplicates_for_unique_content(client_factory, monkeypatch) -> None:
     from app.api.v1 import documents
 
     async def _mock_empty(*a, **k):
