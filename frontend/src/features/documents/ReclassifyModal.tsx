@@ -56,11 +56,6 @@ export const ReclassifyModal: React.FC<ReclassifyModalProps> = ({
       return api.post(`/v1/documents/${document.id}/classification`, {
         level_name: targetLevel.toLowerCase(), // backend LevelName enum is lowercase
         doc_type_id: docTypeId,
-        // NOTE: the API's ReclassifyRequest does not yet model `justification`,
-        // so Pydantic drops it and it is NOT persisted with the audit row. The
-        // requirement is therefore enforced HERE ONLY — a prompt to the human
-        // operator, not a control. It is sent so the field lands the moment the
-        // backend accepts it; until then, treat the justification as unrecorded.
         ...(isLowering ? { justification: justification.trim() } : {}),
       });
     },
