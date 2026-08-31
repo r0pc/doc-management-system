@@ -275,6 +275,7 @@ class AccessLog(Base):
     action: Mapped[str] = mapped_column(Text)
     ip: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text)
     ts: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
 
 

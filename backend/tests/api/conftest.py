@@ -133,6 +133,7 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         actor_id: UUID | None,
         action: str,
         request: Any,
+        detail: str | None = None,
     ) -> None:
         entries.append(
             {
@@ -141,6 +142,7 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
                 "document_id": document_id,
                 "actor_id": actor_id,
                 "action": action,
+                "detail": detail,
             }
         )
 
@@ -151,9 +153,8 @@ def journal(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 @pytest.fixture
 def captured_page_args(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     from app.api.v1 import documents
-    
+
     captured: dict[str, Any] = {}
-    original = documents._fetch_document_page
 
     async def spy(session, user, after, limit_plus_one, **kwargs):
         captured.update(kwargs)
@@ -211,11 +212,15 @@ def client_factory(
         app = build_app(monkeypatch, settings_override, blob_storage, user=user)
         return TestClient(app, **client_kwargs)
 
-    def with_document(blob_key: str | None = None, status: str = "ready") -> tuple[TestClient, uuid.UUID]:
-        client = make(user=make_user())
+    def with_document(
+        blob_key: str | None = None, status: str = "ready", **user_kwargs: Any
+    ) -> tuple[TestClient, uuid.UUID]:
+        client = make(user=make_user(**user_kwargs))
         doc_id = uuid.uuid4()
-        from app.api.v1.documents import DocumentView
         from datetime import UTC, datetime
+
+        from app.api.v1.documents import DocumentView
+
         async def fake_view(*a: Any, **k: Any) -> DocumentView:
             return DocumentView(
                 id=doc_id,
@@ -233,16 +238,19 @@ def client_factory(
                 blob_size=10,
                 current_version_id=uuid.uuid4(),
             )
+
         monkeypatch.setattr("app.api.v1.documents._fetch_document_view", fake_view)
         return client, doc_id
 
-    def with_ready_document() -> tuple[TestClient, uuid.UUID]:
-        return with_document(blob_key="docs-primary/t/ab/abc", status="ready")
+    def with_ready_document(**user_kwargs: Any) -> tuple[TestClient, uuid.UUID]:
+        return with_document(blob_key="docs-primary/t/ab/abc", status="ready", **user_kwargs)
 
     def foreign_document_id() -> uuid.UUID:
         doc_id = uuid.uuid4()
-        from app.api.v1.documents import DocumentView
         from datetime import UTC, datetime
+
+        from app.api.v1.documents import DocumentView
+
         async def fake_view(*a: Any, **k: Any) -> DocumentView:
             return DocumentView(
                 id=doc_id,
@@ -260,6 +268,7 @@ def client_factory(
                 blob_size=10,
                 current_version_id=uuid.uuid4(),
             )
+
         monkeypatch.setattr("app.api.v1.documents._fetch_document_view", fake_view)
         return doc_id
 

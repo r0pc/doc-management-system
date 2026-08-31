@@ -48,7 +48,7 @@ from app.config import Settings
 from app.db.models import Document, DocumentVersion
 from app.domain.models import DEFAULT_FLOOR_RANK, Action, DocumentRef, UserCtx
 from app.domain.policy import can_access
-from app.storage.base import Storage, clamp_presign_ttl
+from app.storage.base import Storage
 from app.storage.keys import quarantine_key
 
 logger = logging.getLogger(__name__)
@@ -210,21 +210,14 @@ async def create_upload_intent(
             filename=payload.filename,
             actor_id=actor_id,
         )
-        # S3 backends expose a real presigned PUT; local dev falls back to
-        # its HMAC GET URL (single call site - inlined by the one-off rule).
-        presign_put = getattr(storage, "presign_put", None)
-        fields: dict[str, str] = {}
-        if callable(presign_put):
-            upload = presign_put(
-                key,
-                ttl,
-                content_type=payload.content_type,
-                max_bytes=settings.upload_max_bytes,
-            )
-            url = upload.url
-            fields = upload.fields
-        else:
-            url = storage.presign(key, ttl, filename=payload.filename, method="PUT")
+        upload = storage.presign_put(
+            key,
+            ttl,
+            content_type=payload.content_type,
+            max_bytes=settings.upload_max_bytes,
+        )
+        url = upload.url
+        fields = upload.fields
         await deps.record_audit(
             session,
             tenant_id=user.tenant_id,
@@ -281,12 +274,15 @@ async def complete_upload(
             raise HTTPException(
                 HTTP_409_CONFLICT, "upload did not arrive; the object was never stored"
             )
-        if payload is not None and payload.size_bytes is not None:
-            if quarantine.size_bytes != payload.size_bytes:
-                raise HTTPException(
-                    HTTP_409_CONFLICT,
-                    "stored object size does not match the declared size",
-                )
+        if (
+            payload is not None
+            and payload.size_bytes is not None
+            and quarantine.size_bytes != payload.size_bytes
+        ):
+            raise HTTPException(
+                HTTP_409_CONFLICT,
+                "stored object size does not match the declared size",
+            )
         if quarantine.size_bytes > settings.upload_max_bytes:
             raise HTTPException(HTTP_413_CONTENT_TOO_LARGE, "stored object exceeds upload cap")
 

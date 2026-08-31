@@ -209,6 +209,7 @@ async def record_audit(
     actor_id: uuid.UUID | None,
     action: str,
     request: Request,
+    detail: str | None = None,
 ) -> None:
     """Insert one access_log row on the CALLER'S session/transaction (#30).
 
@@ -226,6 +227,7 @@ async def record_audit(
             document_id=document_id,
             actor_id=actor_id,
             action=action,
+            detail=detail,
             ip=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
             ts=datetime.now(tz=UTC),

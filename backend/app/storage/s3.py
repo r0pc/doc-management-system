@@ -13,7 +13,13 @@ from typing import Any, BinaryIO, Final, Protocol, TypedDict
 # wave; this narrow ignore is the documented exception (mypy strict otherwise).
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
-from app.storage.base import ByteStream, PresignedUpload, PrimaryBlobGuard, clamp_presign_ttl
+from app.storage.base import (
+    ByteStream,
+    ObjectStat,
+    PresignedUpload,
+    PrimaryBlobGuard,
+    clamp_presign_ttl,
+)
 from app.storage.keys import DEFAULT_BUCKET_PREFIX, bucket_name, key_kind
 
 

@@ -46,10 +46,15 @@ def _is_plain_text(data: bytes) -> bool:
     """Check whether bytes represent clean printable/whitespace text."""
     if not data or b"\x00" in data[:1024]:
         return False
-    # Validate only the first chunk to avoid OOM on large files.
-    # Replace errors so we don't fail on a truncated multi-byte char at the boundary.
-    chunk = data[:4096].decode("utf-8", errors="replace")
-    return True
+    try:
+        # Validate only the first chunk to avoid OOM on large files.
+        # Strict mode will fail if it's not valid UTF-8.
+        # (A multi-byte char truncated at the 4096 boundary will throw, but
+        # checking 4096 bytes without b"\x00" is a very strong signal for text).
+        data[:4096].decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
 
 
 def sniff_mime(data: bytes) -> str:

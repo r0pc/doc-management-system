@@ -8,6 +8,7 @@ blob plus a new ``document_versions`` row. Both backends enforce this through
 from __future__ import annotations
 
 import tempfile
+from dataclasses import dataclass
 from typing import BinaryIO, Final, Protocol
 
 from app.storage.keys import key_kind
@@ -44,9 +45,6 @@ class ImmutableKeyError(Exception):
     def __init__(self, key: str) -> None:
         super().__init__(f"primary-bucket keys are immutable: {key}")
         self.key = key
-
-
-from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

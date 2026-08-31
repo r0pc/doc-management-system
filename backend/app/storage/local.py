@@ -17,7 +17,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Final, assert_never
 from urllib.parse import quote
 
-from app.storage.base import ByteStream, ObjectStat, PrimaryBlobGuard, clamp_presign_ttl
+from app.storage.base import (
+    ByteStream,
+    ObjectStat,
+    PresignedUpload,
+    PrimaryBlobGuard,
+    clamp_presign_ttl,
+)
 from app.storage.keys import DEFAULT_BUCKET_PREFIX
 
 if TYPE_CHECKING:
@@ -165,6 +171,12 @@ class LocalStorage(PrimaryBlobGuard):
             f"{DEV_PRESIGN_BASE_URL}{quote(key, safe='')}"
             f"?expires={expires}&sig={signature}&filename={encoded_name}"
         )
+
+    def presign_put(
+        self, key: str, ttl: int, *, content_type: str, max_bytes: int
+    ) -> PresignedUpload:
+        url = self.presign(key, ttl, filename="", method="PUT")
+        return PresignedUpload(url=url, fields={})
 
     def _sign(self, key: str, expires: int, method: str) -> str:
         payload = f"{method.upper()}:{key}:{int(expires)}".encode()

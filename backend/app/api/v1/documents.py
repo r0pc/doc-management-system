@@ -40,7 +40,7 @@ from typing import Any, BinaryIO, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, insert, or_, select, tuple_, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -167,6 +167,7 @@ class JobOut(BaseModel):
 class ReclassifyRequest(BaseModel):
     level_name: LevelName
     doc_type_id: uuid.UUID | None = None
+    justification: str | None = Field(None, max_length=1000)
 
 
 class LabelView(BaseModel):
@@ -356,7 +357,7 @@ async def _fetch_document_page(
         stmt = stmt.where(Document.department_id.is_(None))
     if after is not None:
         stmt = stmt.where(tuple_(Document.created_at, Document.id) > after)
-    
+
     stmt = stmt.limit(limit_plus_one)
     rows = (await session.execute(stmt)).all()
     return [
@@ -677,7 +678,9 @@ def _ensure_filename_extension(filename: str, mime: str | None) -> str:
 def _not_ready(view: DocumentView) -> Response | None:
     if view.blob_key is None:
         if view.status in ("processing", "held", "failed", "quarantined"):
-            return JSONResponse(status_code=409, content={"detail": f"document is still {view.status}"})
+            return JSONResponse(
+                status_code=409, content={"detail": f"document is still {view.status}"}
+            )
         return not_found()
     return None
 
@@ -698,6 +701,8 @@ async def download_document_content(
             return not_found()
         if not_ready_resp := _not_ready(view):
             return not_ready_resp
+        if view.blob_key is None:
+            return not_found()
         download_name = _ensure_filename_extension(view.original_filename, view.blob_mime)
         total = view.blob_size or 0
         rank = view.level_rank if view.level_rank is not None else DEFAULT_FLOOR_RANK
@@ -766,6 +771,8 @@ async def view_document_content(
             return not_found()
         if not_ready_resp := _not_ready(view):
             return not_ready_resp
+        if view.blob_key is None:
+            return not_found()
         view_name = _ensure_filename_extension(view.original_filename, view.blob_mime)
         total = view.blob_size or 0
         rank = view.level_rank if view.level_rank is not None else DEFAULT_FLOOR_RANK
@@ -1034,6 +1041,7 @@ async def reclassify_document(
             actor_id=actor_id,
             action="reclassify.human",
             request=request,
+            detail=payload.justification,
         )
         await session.commit()
     return LabelView(
