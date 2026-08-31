@@ -23,6 +23,7 @@ export const UploadPage: React.FC = () => {
   const [uploadStage, setUploadStage] = useState<'idle' | 'intent' | 'uploading' | 'completing' | 'done'>('idle');
   const [error, setError] = useState<unknown>(null);
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortController = useRef<AbortController | null>(null);
 
   // Clear the post-success redirect timer on unmount. Without this, navigating
   // away during the 1.2s success pause fired `navigate()` against an unmounted
@@ -99,8 +100,14 @@ export const UploadPage: React.FC = () => {
       // The file body goes browser -> storage. It never passes through `api.post`
       // and never reaches the API origin.
       setUploadStage('uploading');
-      await api.putDirect(intent.presigned_put.url, file, contentType, intent.presigned_put.fields, (percent) =>
-        setUploadProgress(percent)
+      abortController.current = new AbortController();
+      await api.putDirect(
+        intent.presigned_put.url,
+        file,
+        contentType,
+        intent.presigned_put.fields,
+        (percent) => setUploadProgress(percent),
+        abortController.current.signal
       );
 
       // Step 3: Complete upload and enqueue processing chain
@@ -253,7 +260,17 @@ export const UploadPage: React.FC = () => {
 
             <ProblemAlert error={error} />
 
-            <div className="pt-2">
+            <div className="pt-2 flex gap-2">
+              {uploadStage === 'uploading' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => abortController.current?.abort()}
+                  className="w-full h-8 border-[#cf222e] text-[#cf222e] hover:bg-[#ffebe9] dark:border-[#f85149] dark:text-[#ff7b72] dark:hover:bg-[#490202]"
+                >
+                  Cancel Upload
+                </Button>
+              )}
               <Button
                 type="submit"
                 variant="default"

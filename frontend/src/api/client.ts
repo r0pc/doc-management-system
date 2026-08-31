@@ -12,6 +12,7 @@ export class ApiError extends Error {
   }
 }
 
+const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 export const AUTH_TOKEN_STORAGE_KEY = 'dms_auth_token';
 
 /**
@@ -208,13 +209,13 @@ export const api = {
     return request<T>(path, { method: 'DELETE' });
   },
 
-  // Direct PUT to presigned URL without Authorization header (Invariant #1)
   putDirect: async (
     url: string,
     file: Blob | ArrayBuffer,
     contentType: string,
     fields: Record<string, string>,
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal
   ): Promise<void> => {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -225,6 +226,15 @@ export const api = {
       // credential, and adding a second one would leak the session to the
       // storage host and break the signature on strict S3 implementations.
       xhr.withCredentials = false;
+      // Without a timeout an XHR that is torn down (tab throttling, a proxy
+      // dropping the socket) fires no event at all: the promise never settles,
+      // the submit button stays disabled, and the user sees no error ever.
+      xhr.timeout = UPLOAD_TIMEOUT_MS;
+
+      const detach = () => {
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => xhr.abort();
 
       let data: FormData | Blob | ArrayBuffer = file;
       if (isPost) {
@@ -248,6 +258,7 @@ export const api = {
       }
 
       xhr.onload = () => {
+        detach();
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
@@ -256,9 +267,25 @@ export const api = {
       };
 
       xhr.onerror = () => {
+        detach();
         reject(new ApiError(0, 'Storage upload network error'));
       };
+      
+      xhr.ontimeout = () => {
+        detach();
+        reject(new ApiError(0, 'Storage upload timed out'));
+      };
+      
+      xhr.onabort = () => {
+        detach();
+        reject(new ApiError(0, 'Upload cancelled'));
+      };
 
+      if (signal?.aborted) {
+        reject(new ApiError(0, 'Upload cancelled'));
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
       xhr.send(data);
     });
   },

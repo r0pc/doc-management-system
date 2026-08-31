@@ -314,9 +314,15 @@ describe('putDirect — invariant #1 (browser to storage, no broker)', () => {
     upload: { onprogress: ((e: ProgressEvent) => void) | null } = { onprogress: null };
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
+    ontimeout: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    timeout = 0;
 
     constructor() {
       FakeXhr.instances.push(this);
+    }
+    abort() {
+      if (this.onabort) this.onabort();
     }
     open(method: string, url: string) {
       this.method = method;
@@ -406,6 +412,28 @@ describe('putDirect — invariant #1 (browser to storage, no broker)', () => {
     const err = await captureApiError(promise);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(0);
+  });
+
+  it('rejects when the transfer is aborted', async () => {
+    const controller = new AbortController();
+    const promise = api.putDirect('http://storage/x', new Blob(['x']), 'text/plain', {}, undefined, controller.signal);
+    controller.abort();
+    const err = await captureApiError(promise);
+    expect(err.message).toMatch(/cancel|abort/i);
+  });
+
+  it('rejects when the transfer times out', async () => {
+    const promise = api.putDirect('http://storage/x', new Blob(['x']), 'text/plain', {});
+    const xhr = FakeXhr.instances[0];
+    xhr.ontimeout?.();
+    const err = await captureApiError(promise);
+    expect(err.message).toMatch(/time|out/i);
+  });
+
+  it('sets a non-zero timeout so a stalled transfer cannot hang forever', () => {
+    void api.putDirect('http://storage/x', new Blob(['x']), 'text/plain', {});
+    const xhr = FakeXhr.instances[0];
+    expect(xhr.timeout).toBeGreaterThan(0);
   });
 });
 
