@@ -11,12 +11,13 @@ from app.extraction.registry import (
     extract_document,
     get_handler,
 )
-from app.extraction.sniff import MIME_DOCX, MIME_PDF, MIME_XLSX, MIME_ZIP
+from app.extraction.sniff import MIME_DOCX, MIME_PDF, MIME_TEXT, MIME_XLSX, MIME_ZIP
+from app.extraction.text import TextHandler
 from app.extraction.xlsx import XlsxHandler
 
 
 def test_registry_maps_exactly_the_supported_mimes() -> None:
-    assert set(build_registry()) == {MIME_PDF, MIME_DOCX, MIME_XLSX}
+    assert set(build_registry()) == {MIME_PDF, MIME_DOCX, MIME_XLSX, MIME_TEXT}
 
 
 @pytest.mark.parametrize(
@@ -25,13 +26,14 @@ def test_registry_maps_exactly_the_supported_mimes() -> None:
         (MIME_PDF, PdfHandler),
         (MIME_DOCX, DocxHandler),
         (MIME_XLSX, XlsxHandler),
+        (MIME_TEXT, TextHandler),
     ],
 )
 def test_get_handler_returns_matching_handler_type(mime: str, handler_type: type) -> None:
     assert isinstance(get_handler(mime), handler_type)
 
 
-@pytest.mark.parametrize("mime", ["text/plain", MIME_ZIP, "image/png"])
+@pytest.mark.parametrize("mime", [MIME_ZIP, "image/png", "application/x-tar"])
 def test_get_handler_rejects_known_but_unsupported_mime(mime: str) -> None:
     with pytest.raises(UnsupportedMimeError) as excinfo:
         get_handler(mime)

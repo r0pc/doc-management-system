@@ -10,7 +10,8 @@ from __future__ import annotations
 from app.extraction.base import ExtractedDocument, ExtractionHandler
 from app.extraction.docx import DocxHandler
 from app.extraction.pdf import PdfHandler
-from app.extraction.sniff import MIME_DOCX, MIME_PDF, MIME_XLSX, sniff_mime
+from app.extraction.sniff import MIME_DOCX, MIME_PDF, MIME_TEXT, MIME_XLSX, sniff_mime
+from app.extraction.text import TextHandler
 from app.extraction.xlsx import XlsxHandler
 
 
@@ -24,6 +25,7 @@ def build_registry() -> dict[str, ExtractionHandler]:
         MIME_PDF: PdfHandler(),
         MIME_DOCX: DocxHandler(),
         MIME_XLSX: XlsxHandler(),
+        MIME_TEXT: TextHandler(),
     }
 
 
