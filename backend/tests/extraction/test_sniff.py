@@ -58,3 +58,8 @@ def test_misnamed_extension_cannot_influence_dispatch(pdf_bytes: bytes) -> None:
 def test_no_filename_parameter_exists_on_public_api() -> None:
     for func in (sniff_mime, extract_document):
         assert "filename" not in inspect.signature(func).parameters
+
+def test_sniff_text_plain(tmp_path) -> None:
+    p = tmp_path / "x.txt"
+    p.write_bytes(b"Hello world")
+    assert sniff_mime(p.read_bytes()) == "text/plain"

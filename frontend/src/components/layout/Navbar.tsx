@@ -2,7 +2,7 @@ import React from 'react';
 import { UserSwitcher } from './UserSwitcher';
 import { useAuth } from '../../api/auth';
 import { ThemeToggle } from '../theme/ThemeToggle';
-import { Shield, Sparkles } from 'lucide-react';
+import { Shield } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   // The dev-persona switcher mints admin sessions from a dropdown. It is only
@@ -20,21 +20,11 @@ export const Navbar: React.FC = () => {
         <div>
           <h1 className="font-semibold text-[#1f2328] dark:text-[#e6edf3] text-sm leading-tight tracking-tight flex items-center gap-2">
             Secure DMS
-            <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded-full bg-[#ddf4ff] text-[#0969da] dark:bg-[#388bfd]/20 dark:text-[#58a6ff] border border-[#54aeff]/30">
-              v1.0
-            </span>
           </h1>
-          <p className="text-[11px] text-[#656d76] dark:text-[#848d97] hidden sm:block">
-            Self-Hosted Classification & Multi-Tenant Access Control
-          </p>
         </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="hidden md:flex items-center gap-1.5 text-[11px] text-[#1a7f37] dark:text-[#3fb950] bg-[#dafbe1] dark:bg-[#238636]/20 px-2 py-0.5 rounded-md border border-[#4ac26b]/40 font-medium">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>Airgapped & Self-Hosted</span>
-        </div>
         <ThemeToggle />
         {devPersonasEnabled && <UserSwitcher />}
       </div>

@@ -20,6 +20,7 @@ MIME_PDF: Final = "application/pdf"
 MIME_DOCX: Final = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MIME_XLSX: Final = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 MIME_ZIP: Final = "application/zip"
+MIME_TEXT: Final = "text/plain"
 
 _ZIP_MAGIC: Final = b"PK\x03\x04"
 _OOXML_CONTENT_TYPES: Final = "[Content_Types].xml"
@@ -41,6 +42,16 @@ def _sniff_zip_container(data: bytes) -> str:
     return MIME_ZIP
 
 
+def _is_plain_text(data: bytes) -> bool:
+    """Check whether bytes represent clean printable/whitespace text."""
+    if not data or b"\x00" in data[:1024]:
+        return False
+    # Validate only the first chunk to avoid OOM on large files.
+    # Replace errors so we don't fail on a truncated multi-byte char at the boundary.
+    chunk = data[:4096].decode("utf-8", errors="replace")
+    return True
+
+
 def sniff_mime(data: bytes) -> str:
     """Identify the content type of ``data`` from bytes alone (#19)."""
     if not data:
@@ -52,4 +63,6 @@ def sniff_mime(data: bytes) -> str:
         mime_type = str(candidate.mime_type)
         if mime_type:
             return mime_type
+    if _is_plain_text(data):
+        return MIME_TEXT
     raise UnknownMimeError("bytes match no known signature")

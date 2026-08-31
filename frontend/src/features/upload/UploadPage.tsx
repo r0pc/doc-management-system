@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { UploadIntentResponse } from '../../api/types';
-import { useAuth } from '../../api/auth';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -14,11 +13,9 @@ import { formatBytes } from '../../lib/utils';
 export const UploadPage: React.FC = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { currentPersona } = useAuth();
 
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
-  const [departmentId, setDepartmentId] = useState(currentPersona?.departmentId || '');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState<'idle' | 'intent' | 'uploading' | 'completing' | 'done'>('idle');
   const [error, setError] = useState<unknown>(null);
@@ -34,13 +31,6 @@ export const UploadPage: React.FC = () => {
     },
     []
   );
-
-  // Sync default department when persona switches
-  React.useEffect(() => {
-    if (currentPersona?.departmentId) {
-      setDepartmentId(currentPersona.departmentId);
-    }
-  }, [currentPersona]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -167,49 +157,32 @@ export const UploadPage: React.FC = () => {
 
             <div>
               <label
-                htmlFor="upload-department"
-                className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1"
-              >
-                Target Department UUID
-              </label>
-              <Input
-                id="upload-department"
-                type="text"
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
-                placeholder="00000000-0000-0000-0000-000000000010"
-                required
-              />
-              <p className="text-[11px] text-[#656d76] dark:text-[#848d97] mt-1">
-                Current Persona Department: {currentPersona?.departmentLabel}
-              </p>
-            </div>
-
-            <div>
-              <label
                 htmlFor="upload-file"
                 className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1"
               >
-                Document File (.pdf, .docx, .xlsx)
+                Document File (.pdf, .docx, .xlsx, .txt)
               </label>
               <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-[#d0d7de] dark:border-[#30363d] border-dashed rounded-md hover:border-[#0969da] dark:hover:border-[#2f81f7] transition-colors bg-[#f6f8fa] dark:bg-[#161b22]">
-                <div className="space-y-2 text-center">
-                  <UploadCloud className="mx-auto h-7 w-7 text-[#656d76] dark:text-[#848d97]" />
-                  <div className="flex text-xs text-[#656d76] dark:text-[#848d97] justify-center">
-                    <label className="relative cursor-pointer bg-white dark:bg-[#21262d] rounded font-semibold text-[#0969da] dark:text-[#2f81f7] hover:underline focus-within:outline-none px-2 py-0.5 border border-[#d0d7de] dark:border-[#30363d] shadow-2xs">
-                      <span>Choose file</span>
-                      <input
-                        id="upload-file"
-                        type="file"
-                        className="sr-only"
-                        accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        onChange={handleFileChange}
-                      />
+                <input
+                  id="upload-file"
+                  type="file"
+                  accept=".pdf,.docx,.xlsx,.txt"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <div className="text-center w-full">
+                  <div className="flex items-center justify-center gap-2 text-xs text-[#0969da] dark:text-[#58a6ff] mb-1">
+                    <UploadCloud className="w-5 h-5" />
+                    <label
+                      htmlFor="upload-file"
+                      className="cursor-pointer hover:underline font-semibold"
+                    >
+                      Select File
                     </label>
-                    <p className="pl-1.5 py-0.5">or drag and drop</p>
+                    <p className="pl-1.5 py-0.5 text-[#1f2328] dark:text-[#e6edf3]">or drag and drop</p>
                   </div>
                   <p className="text-[10px] text-[#656d76] dark:text-[#848d97]">
-                    PDF, DOCX, or XLSX up to 100 MiB (MIME sniffed on ingestion)
+                    PDF, DOCX, XLSX, or TXT up to 100 MiB (MIME sniffed on ingestion)
                   </p>
                 </div>
               </div>

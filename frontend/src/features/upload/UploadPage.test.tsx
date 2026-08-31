@@ -283,12 +283,24 @@ describe('UploadPage — failure handling', () => {
   });
 });
 
+  describe('UploadPage — form requirements', () => {
+    it('allows text files', () => {
+      renderWithProviders(<UploadPage />);
+      const input = screen.getByLabelText(/document file/i) as HTMLInputElement;
+      expect(input.accept).toContain('.txt');
+    });
+
+    it('does not render a Department selector', () => {
+      renderWithProviders(<UploadPage />);
+      expect(screen.queryByLabelText(/target department/i)).toBeNull();
+    });
+  });
+
 describe('UploadPage — form accessibility', () => {
   it('associates every control with a label', () => {
     renderWithProviders(<UploadPage />);
 
     expect(screen.getByLabelText(/document title/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/target department uuid/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/document file/i)).toBeInTheDocument();
   });
 
