@@ -14,6 +14,7 @@ import asyncio
 import os
 import secrets
 import sys
+import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -26,8 +27,10 @@ import psycopg
 import pytest
 from alembic.config import Config
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from app.db.models import Department, Document, DocumentVersion, Tenant, User
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -161,3 +164,58 @@ def app_role_db(migrated_db: DbTarget) -> Iterator[psycopg.Connection]:
     with psycopg.connect(url) as conn:
         yield conn
         conn.rollback()
+
+
+@pytest.fixture()
+def sync_sessions(migrated_db: DbTarget) -> Iterator[sessionmaker[Session]]:
+    """Sync session factory bound to the migrated_db, as the journal uses in
+    production (``ProcessingJobsJournal`` runs against ``Settings.sync_db_url``,
+    which is PG-specific and has no sqlite equivalent)."""
+    engine = create_engine(migrated_db.sqlalchemy_url)
+    try:
+        yield sessionmaker(bind=engine, expire_on_commit=False)
+    finally:
+        engine.dispose()
+
+
+@dataclass(frozen=True, slots=True)
+class SeededVersion:
+    """Just enough of the document/version FK chain to drive the jobs journal."""
+
+    document_id: uuid.UUID
+    id: uuid.UUID
+
+
+@pytest.fixture()
+def seeded_version(sync_sessions: sessionmaker[Session]) -> SeededVersion:
+    """One tenant/department/user/document/version row tree."""
+    with sync_sessions() as session, session.begin():
+        tenant = Tenant(name="Journal Test Tenant")
+        session.add(tenant)
+        session.flush()
+        department = Department(tenant_id=tenant.id, name="General")
+        session.add(department)
+        session.flush()
+        user = User(
+            tenant_id=tenant.id,
+            department_id=department.id,
+            oidc_sub=f"journal-test-{uuid.uuid4()}",
+            email="journal-test@example.invalid",
+            role="employee",
+            clearance_rank=1,
+        )
+        session.add(user)
+        session.flush()
+        document = Document(
+            tenant_id=tenant.id,
+            department_id=department.id,
+            original_filename="journal-test.pdf",
+            status="processing",
+            uploaded_by=user.id,
+        )
+        session.add(document)
+        session.flush()
+        version = DocumentVersion(document_id=document.id, version_no=1, created_by=user.id)
+        session.add(version)
+        session.flush()
+        return SeededVersion(document_id=document.id, id=version.id)

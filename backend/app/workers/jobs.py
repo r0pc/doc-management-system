@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Final, Protocol, TypeVar
 
 from sqlalchemy import delete, select, text, update
@@ -149,6 +150,7 @@ class ProcessingJobsJournal:
                     stage=stage,
                     state="running",
                     attempts=1,
+                    started_at=datetime.now(UTC),
                 )
                 session.add(row)
                 session.flush()
@@ -156,7 +158,12 @@ class ProcessingJobsJournal:
             session.execute(
                 update(ProcessingJob)
                 .where(ProcessingJob.id == job_id)
-                .values(state="running", attempts=ProcessingJob.attempts + 1)
+                .values(
+                    state="running",
+                    attempts=ProcessingJob.attempts + 1,
+                    started_at=datetime.now(UTC),
+                    finished_at=None,
+                )
             )
             return job_id
 
@@ -167,7 +174,7 @@ class ProcessingJobsJournal:
             session.execute(
                 update(ProcessingJob)
                 .where(ProcessingJob.id == job_row_id)
-                .values(state="succeeded", error=None)
+                .values(state="succeeded", error=None, finished_at=datetime.now(UTC))
             )
 
         self._write(op)
@@ -177,7 +184,7 @@ class ProcessingJobsJournal:
             session.execute(
                 update(ProcessingJob)
                 .where(ProcessingJob.id == job_row_id)
-                .values(state="failed", error=error)
+                .values(state="failed", error=error, finished_at=datetime.now(UTC))
             )
 
         self._write(op)
@@ -187,7 +194,7 @@ class ProcessingJobsJournal:
             session.execute(
                 update(ProcessingJob)
                 .where(ProcessingJob.id == job_row_id)
-                .values(state="skipped", error=reason)
+                .values(state="skipped", error=reason, finished_at=datetime.now(UTC))
             )
 
         self._write(op)
