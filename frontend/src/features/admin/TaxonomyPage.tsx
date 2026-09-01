@@ -88,9 +88,11 @@ export const TaxonomyPage: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-[#d0d7de] dark:border-[#30363d] space-x-2">
+      <div role="tablist" className="flex border-b border-[#d0d7de] dark:border-[#30363d] space-x-2">
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'taxonomy'}
           onClick={() => setActiveTab('taxonomy')}
           className={`flex items-center gap-2 px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
             activeTab === 'taxonomy'
@@ -103,6 +105,8 @@ export const TaxonomyPage: React.FC = () => {
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'detectors'}
           onClick={() => setActiveTab('detectors')}
           className={`flex items-center gap-2 px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
             activeTab === 'detectors'
@@ -115,6 +119,8 @@ export const TaxonomyPage: React.FC = () => {
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'prototypes'}
           onClick={() => setActiveTab('prototypes')}
           className={`flex items-center gap-2 px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
             activeTab === 'prototypes'
