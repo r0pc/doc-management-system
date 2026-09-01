@@ -46,6 +46,7 @@ def test_max_file_size_covers_the_upload_cap() -> None:
     cap = _dev_settings().upload_max_bytes
     assert _parse_size(_directive("MaxFileSize")) >= cap
 
+
 def test_local_socket_is_declared() -> None:
     """The image's /init blocks until a unix socket exists.
 
@@ -55,6 +56,6 @@ def test_local_socket_is_declared() -> None:
     every scan fails transiently. Regression guard: this exact omission shipped.
     """
     socket_path = _directive("LocalSocket")
-    assert socket_path in ("/run/clamav/clamd.sock", "/tmp/clamd.sock"), (
+    assert socket_path in ("/run/clamav/clamd.sock", "/tmp/clamd.sock"), (  # noqa: S108
         f"LocalSocket={socket_path!r} is not a path the image's /init waits on"
     )
