@@ -55,6 +55,21 @@ def validate_entropy(text: str, config: dict[str, Any] | None = None) -> bool:
     return entropy >= min_bits
 
 
+def _expand_charset(charset: str) -> set[str]:
+    result: set[str] = set()
+    i = 0
+    while i < len(charset):
+        if i + 2 < len(charset) and charset[i + 1] == "-":
+            start_c, end_c = charset[i], charset[i + 2]
+            for code in range(ord(start_c), ord(end_c) + 1):
+                result.add(chr(code))
+            i += 3
+        else:
+            result.add(charset[i])
+            i += 1
+    return result
+
+
 def validate_prefix_charset(text: str, config: dict[str, Any] | None = None) -> bool:
     if not config:
         return False
@@ -66,7 +81,7 @@ def validate_prefix_charset(text: str, config: dict[str, Any] | None = None) -> 
         return False
     charset = config.get("charset")
     if charset:
-        charset_set = set(charset)
+        charset_set = _expand_charset(charset)
         if any(c not in charset_set for c in text):
             return False
     return True

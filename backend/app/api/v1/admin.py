@@ -20,18 +20,24 @@ spec §6), so no visibility axes apply here — only the MANAGE_TAXONOMY gate.
 from __future__ import annotations
 
 import uuid
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_409_CONFLICT
 
 from app.api import deps
 from app.classification.ml.prototypes import MAX_SAMPLES, MIN_SAMPLES, compute_centroid
+from app.classification.rules.configured import ConfiguredRecognizer
+from app.classification.rules.safety import PatternUnsafeError, assert_pattern_safe
+from app.classification.rules.validators import VALIDATORS
 from app.db.models import (
     Classification,
+    DetectorRule,
     DocType,
     DocTypePrototype,
     Document,
@@ -75,6 +81,56 @@ class TrainPrototypeResponse(BaseModel):
     doc_type_id: uuid.UUID
     sample_count: int
     dimension: int
+
+
+class DetectorRuleOut(BaseModel):
+    id: uuid.UUID
+    entity_type: str
+    pattern: str
+    validator_kind: str
+    validator_config: dict[str, Any]
+    context_words: list[str]
+    level_rank: int
+    enabled: bool
+
+
+class DetectorRuleCreate(BaseModel):
+    entity_type: str = Field(min_length=1, max_length=128)
+    pattern: str = Field(min_length=1, max_length=512)
+    validator_kind: str = Field(min_length=1, max_length=64)
+    validator_config: dict[str, Any] = Field(default_factory=dict)
+    context_words: list[str] = Field(min_length=1)
+    level_rank: int = Field(ge=1, le=4)
+    enabled: bool = True
+
+
+class DetectorRuleUpdate(BaseModel):
+    pattern: str | None = Field(default=None, min_length=1, max_length=512)
+    validator_kind: str | None = Field(default=None, min_length=1, max_length=64)
+    validator_config: dict[str, Any] | None = None
+    context_words: list[str] | None = Field(default=None, min_length=1)
+    level_rank: int | None = Field(default=None, ge=1, le=4)
+    enabled: bool | None = None
+
+
+class DetectorPreviewRequest(BaseModel):
+    entity_type: str = Field(min_length=1, max_length=128)
+    pattern: str = Field(min_length=1, max_length=512)
+    validator_kind: str = Field(min_length=1, max_length=64)
+    validator_config: dict[str, Any] = Field(default_factory=dict)
+    context_words: list[str] = Field(min_length=1)
+    level_rank: int = Field(ge=1, le=4)
+    sample_text: str = Field(min_length=1, max_length=100000)
+
+
+class DetectorMatchOut(BaseModel):
+    char_start: int
+    char_end: int
+    score: float
+
+
+class DetectorPreviewResponse(BaseModel):
+    matches: list[DetectorMatchOut]
 
 
 # --- data-access seams (monkeypatched in unit tests; SQL proven Wave 5) ---
@@ -205,6 +261,122 @@ async def _upsert_prototype(
     await session.execute(stmt)
 
 
+async def _fetch_detector_rules(
+    session: AsyncSession, tenant_id: uuid.UUID
+) -> list[DetectorRuleOut]:
+    rows = (
+        await session.execute(
+            select(
+                DetectorRule.id,
+                DetectorRule.entity_type,
+                DetectorRule.pattern,
+                DetectorRule.validator_kind,
+                DetectorRule.validator_config,
+                DetectorRule.context_words,
+                DetectorRule.level_rank,
+                DetectorRule.enabled,
+            )
+            .where(DetectorRule.tenant_id == tenant_id)
+            .order_by(DetectorRule.entity_type.asc())
+        )
+    ).all()
+    return [
+        DetectorRuleOut(
+            id=r.id,
+            entity_type=r.entity_type,
+            pattern=r.pattern,
+            validator_kind=r.validator_kind,
+            validator_config=r.validator_config,
+            context_words=list(r.context_words),
+            level_rank=r.level_rank,
+            enabled=r.enabled,
+        )
+        for r in rows
+    ]
+
+
+async def _insert_detector_rule(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    payload: DetectorRuleCreate,
+) -> DetectorRuleOut:
+    rule_id = uuid.uuid4()
+    row = DetectorRule(
+        id=rule_id,
+        tenant_id=tenant_id,
+        entity_type=payload.entity_type,
+        pattern=payload.pattern,
+        validator_kind=payload.validator_kind,
+        validator_config=payload.validator_config,
+        context_words=payload.context_words,
+        level_rank=payload.level_rank,
+        enabled=payload.enabled,
+    )
+    session.add(row)
+    await session.flush()
+    return DetectorRuleOut(
+        id=rule_id,
+        entity_type=payload.entity_type,
+        pattern=payload.pattern,
+        validator_kind=payload.validator_kind,
+        validator_config=payload.validator_config,
+        context_words=payload.context_words,
+        level_rank=payload.level_rank,
+        enabled=payload.enabled,
+    )
+
+
+async def _update_detector_rule(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    rule_id: uuid.UUID,
+    payload: DetectorRuleUpdate,
+) -> DetectorRuleOut | None:
+    row = (
+        await session.execute(
+            select(DetectorRule).where(
+                DetectorRule.id == rule_id, DetectorRule.tenant_id == tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    if payload.pattern is not None:
+        row.pattern = payload.pattern
+    if payload.validator_kind is not None:
+        row.validator_kind = payload.validator_kind
+    if payload.validator_config is not None:
+        row.validator_config = payload.validator_config
+    if payload.context_words is not None:
+        row.context_words = payload.context_words
+    if payload.level_rank is not None:
+        row.level_rank = payload.level_rank
+    if payload.enabled is not None:
+        row.enabled = payload.enabled
+    await session.flush()
+    return DetectorRuleOut(
+        id=row.id,
+        entity_type=row.entity_type,
+        pattern=row.pattern,
+        validator_kind=row.validator_kind,
+        validator_config=row.validator_config,
+        context_words=list(row.context_words),
+        level_rank=row.level_rank,
+        enabled=row.enabled,
+    )
+
+
+async def _delete_detector_rule(
+    session: AsyncSession, *, tenant_id: uuid.UUID, rule_id: uuid.UUID
+) -> bool:
+    res = await session.execute(
+        delete(DetectorRule).where(DetectorRule.id == rule_id, DetectorRule.tenant_id == tenant_id)
+    )
+    return (cast(CursorResult[Any], res).rowcount or 0) > 0
+
+
 # --- handlers ---
 
 
@@ -332,3 +504,149 @@ async def list_security_levels(
     """READ-ONLY by design: levels are policy-owned (spec §3.2); no CUD routes."""
     async with sessions(user.tenant_id) as session:
         return await _fetch_security_levels(session)
+
+
+@router.get("/detectors", response_model=list[DetectorRuleOut])
+async def list_detectors(
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> list[DetectorRuleOut]:
+    async with sessions(user.tenant_id) as session:
+        return await _fetch_detector_rules(session, user.tenant_id)
+
+
+@router.post("/detectors", response_model=DetectorRuleOut, status_code=201)
+async def create_detector(
+    request: Request,
+    payload: DetectorRuleCreate,
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> DetectorRuleOut:
+    try:
+        assert_pattern_safe(payload.pattern)
+    except PatternUnsafeError as err:
+        raise HTTPException(status_code=422, detail=f"Pattern unsafe or invalid: {err}") from err
+
+    if payload.validator_kind not in VALIDATORS:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown validator_kind: {payload.validator_kind}"
+        )
+
+    async with sessions(user.tenant_id) as session:
+        rule = await _insert_detector_rule(session, tenant_id=user.tenant_id, payload=payload)
+        actor_id = await deps.provision_actor(session, user)
+        await deps.record_audit(
+            session,
+            tenant_id=user.tenant_id,
+            document_id=None,
+            actor_id=actor_id,
+            action="detector.create",
+            request=request,
+            detail=f"entity_type={payload.entity_type},rule_id={rule.id}",
+        )
+        await session.commit()
+    return rule
+
+
+@router.patch("/detectors/{detector_id}", response_model=DetectorRuleOut)
+async def update_detector(
+    request: Request,
+    detector_id: uuid.UUID,
+    payload: DetectorRuleUpdate,
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> DetectorRuleOut:
+    if payload.pattern is not None:
+        try:
+            assert_pattern_safe(payload.pattern)
+        except PatternUnsafeError as err:
+            raise HTTPException(
+                status_code=422, detail=f"Pattern unsafe or invalid: {err}"
+            ) from err
+
+    if payload.validator_kind is not None and payload.validator_kind not in VALIDATORS:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown validator_kind: {payload.validator_kind}"
+        )
+
+    async with sessions(user.tenant_id) as session:
+        rule = await _update_detector_rule(
+            session, tenant_id=user.tenant_id, rule_id=detector_id, payload=payload
+        )
+        if rule is None:
+            raise HTTPException(status_code=404, detail="Detector rule not found")
+        actor_id = await deps.provision_actor(session, user)
+        await deps.record_audit(
+            session,
+            tenant_id=user.tenant_id,
+            document_id=None,
+            actor_id=actor_id,
+            action="detector.update",
+            request=request,
+            detail=f"rule_id={detector_id}",
+        )
+        await session.commit()
+    return rule
+
+
+@router.delete("/detectors/{detector_id}", status_code=204)
+async def remove_detector(
+    request: Request,
+    detector_id: uuid.UUID,
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> Response:
+    async with sessions(user.tenant_id) as session:
+        deleted = await _delete_detector_rule(
+            session, tenant_id=user.tenant_id, rule_id=detector_id
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Detector rule not found")
+        actor_id = await deps.provision_actor(session, user)
+        await deps.record_audit(
+            session,
+            tenant_id=user.tenant_id,
+            document_id=None,
+            actor_id=actor_id,
+            action="detector.delete",
+            request=request,
+            detail=f"rule_id={detector_id}",
+        )
+        await session.commit()
+    return Response(status_code=204)
+
+
+@router.post("/detectors/preview", response_model=DetectorPreviewResponse)
+async def preview_detector(
+    payload: DetectorPreviewRequest,
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+) -> DetectorPreviewResponse:
+    try:
+        assert_pattern_safe(payload.pattern)
+    except PatternUnsafeError as err:
+        raise HTTPException(status_code=422, detail=f"Pattern unsafe or invalid: {err}") from err
+
+    if payload.validator_kind not in VALIDATORS:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown validator_kind: {payload.validator_kind}"
+        )
+
+    recognizer = ConfiguredRecognizer(
+        entity_type=payload.entity_type,
+        pattern=payload.pattern,
+        context_words=payload.context_words,
+        validator_kind=payload.validator_kind,
+        validator_config=payload.validator_config,
+    )
+    findings = recognizer.scan(payload.sample_text)
+    # Return character offsets and scores only — never matched text (#12)
+    return DetectorPreviewResponse(
+        matches=[
+            DetectorMatchOut(
+                char_start=f.char_start,
+                char_end=f.char_end,
+                score=f.score,
+            )
+            for f in findings
+        ]
+    )

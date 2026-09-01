@@ -208,8 +208,13 @@ def client_factory(
     blob_storage: LocalStorage,
     journal: list[dict[str, Any]],
 ) -> Callable[..., TestClient]:
-    def make(user: UserCtx | None = None, **client_kwargs: bool) -> TestClient:
-        app = build_app(monkeypatch, settings_override, blob_storage, user=user)
+    def make(
+        user: UserCtx | None = None,
+        role: str | None = None,
+        **client_kwargs: Any,
+    ) -> TestClient:
+        resolved_user = make_user(role=role) if (user is None and role is not None) else user
+        app = build_app(monkeypatch, settings_override, blob_storage, user=resolved_user)
         return TestClient(app, **client_kwargs)
 
     def with_document(
