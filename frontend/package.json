@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:clean": "docker exec doc-management-system-postgres-1 psql -U docmgmt -d docmgmt -c \"UPDATE documents SET deleted_at=now() WHERE original_filename LIKE 'E2E-%' AND deleted_at IS NULL;\""
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

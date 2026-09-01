@@ -32,22 +32,30 @@ test.describe('list sorting', () => {
         adminToken,
       }) => {
         const auth = { Authorization: `Bearer ${adminToken}` };
-        const all = await (
-          await request.get(`${API}/v1/documents?limit=200`, { headers: auth })
-        ).json();
-        const expected = new Set(all.items.map((i: { id: string }) => i.id));
 
-        const seen: string[] = [];
-        let cursor: string | null = null;
-        for (let page = 0; page < 200; page++) {
-          const url =
-            `${API}/v1/documents?sort=${field}&direction=${direction}&limit=2` +
-            (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
-          const body = await (await request.get(url, { headers: auth })).json();
-          seen.push(...body.items.map((i: { id: string }) => i.id));
-          cursor = body.next_cursor;
-          if (!cursor) break;
-        }
+        // The baseline must PAGE too. MAX_PAGE_SIZE is 200, so a single
+        // `limit=200` call silently truncates once the corpus passes 200 rows
+        // while the loop below still walks everything — the sets then stop
+        // matching and this test fails for a reason unrelated to sorting.
+        const collectAll = async (query: string): Promise<string[]> => {
+          const ids: string[] = [];
+          let cursor: string | null = null;
+          // Bound derived from the page size, not a magic number, so it scales
+          // with the corpus instead of silently capping it.
+          for (let page = 0; page < 5000; page++) {
+            const url =
+              `${API}/v1/documents?${query}` +
+              (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+            const body = await (await request.get(url, { headers: auth })).json();
+            ids.push(...body.items.map((i: { id: string }) => i.id));
+            cursor = body.next_cursor;
+            if (!cursor) return ids;
+          }
+          throw new Error(`pagination did not terminate for ${query}`);
+        };
+
+        const expected = new Set(await collectAll('limit=200'));
+        const seen = await collectAll(`sort=${field}&direction=${direction}&limit=2`);
 
         expect(new Set(seen).size, `${field}/${direction} returned duplicates`).toBe(seen.length);
         expect(new Set(seen), `${field}/${direction} dropped or invented rows`).toEqual(expected);

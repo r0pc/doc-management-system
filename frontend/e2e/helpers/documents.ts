@@ -42,17 +42,25 @@ export async function uploadDocument(
   return upload_id;
 }
 
-export async function softDelete(
-  request: APIRequestContext,
-  token: string,
-  documentIds: string[]
-): Promise<void> {
-  // Teardown targets only ids this run created. There is no bulk delete route;
-  // if none exists for single documents either, leave the rows and rely on the
-  // RUN_ID prefix keeping them identifiable — never widen a DELETE to compensate.
-  for (const id of documentIds) {
-    await request
-      .delete(`${API}/v1/documents/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-      .catch(() => undefined);
-  }
-}
+/**
+ * Documents this suite creates are NOT removed, and that is deliberate.
+ *
+ * The API exposes no DELETE for documents — deliberately, since `classifications`
+ * is append-only and `access_log` holds no delete grant (#24). An earlier version
+ * of this helper issued `DELETE /v1/documents/{id}` and swallowed the resulting
+ * 405, which read as cleanup while doing nothing at all. Cleanup that silently
+ * no-ops is worse than none: it hides the growth it claims to prevent.
+ *
+ * So rows accumulate under the `E2E-` prefix. Two consequences the suite must
+ * respect, and does:
+ *   - never assert on a total row count (another run may be mid-flight)
+ *   - always PAGE a baseline rather than taking a single capped read, because
+ *     MAX_PAGE_SIZE silently truncates once the corpus outgrows one page
+ *
+ * To reclaim a dev database, soft-delete by prefix — scoped, never unqualified:
+ *   docker exec doc-management-system-postgres-1 psql -U docmgmt -d docmgmt \
+ *     -c "UPDATE documents SET deleted_at=now()
+ *         WHERE original_filename LIKE 'E2E-%' AND deleted_at IS NULL;"
+ * That is `npm run test:e2e:clean`.
+ */
+export const E2E_PREFIX = 'E2E-';
