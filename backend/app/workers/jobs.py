@@ -34,6 +34,7 @@ from app.db.models import (
     Blob,
     Classification,
     DocType,
+    DocTypePrototype,
     Document,
     DocumentKeyword,
     DocumentVersion,
@@ -277,8 +278,8 @@ def replace_keywords(
     return len(terms)
 
 
-def resolve_doc_type_id(session: Session, label: str | None) -> uuid.UUID | None:
-    """Map a model label onto an EXISTING ``doc_types`` row; None when it can't.
+def resolve_doc_type_id(session: Session, label: str | uuid.UUID | None) -> uuid.UUID | None:
+    """Map a model label or UUID onto an EXISTING ``doc_types`` row; None when it can't.
 
     Two failure modes, both non-fatal and both logged, because a document with
     an unresolved type is strictly better than a taxonomy corrupted by model
@@ -297,6 +298,8 @@ def resolve_doc_type_id(session: Session, label: str | None) -> uuid.UUID | None
     """
     if label is None:
         return None
+    if isinstance(label, uuid.UUID):
+        return label
     name = taxonomy_name_for_label(label)
     if name is None:
         logger.warning("doc_type_label_unknown label=%s", label)
@@ -444,3 +447,16 @@ def mark_document_held(sessions: sessionmaker[Session], *, document_id: uuid.UUI
     """
     with sessions() as session, session.begin():
         session.execute(update(Document).where(Document.id == document_id).values(status="held"))
+
+
+def load_tenant_prototypes(
+    sessions: sessionmaker[Session], tenant_id: uuid.UUID
+) -> list[tuple[uuid.UUID, list[float]]]:
+    """Load all trained prototypes for the tenant."""
+    with sessions() as session:
+        rows = session.execute(
+            select(DocTypePrototype.doc_type_id, DocTypePrototype.centroid_vector).where(
+                DocTypePrototype.tenant_id == tenant_id
+            )
+        ).all()
+        return [(row[0], list(row[1])) for row in rows if row[1] is not None]

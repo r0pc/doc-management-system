@@ -36,8 +36,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.classification.ml.loader import MlArtifact, embed_text, get_artifact
-from app.classification.pipeline import classify as run_classification
-from app.classification.pipeline import ml_threshold_from_env
+from app.classification.pipeline import (
+    classify as run_classification,
+)
+from app.classification.pipeline import (
+    ml_threshold_from_env,
+    prototype_threshold_from_env,
+)
 from app.config import Settings, resolve_storage_root
 from app.domain.taxonomy import Taxonomy
 from app.extraction.base import NeedsOcrError, ParserUnavailable, UnknownMimeError
@@ -50,6 +55,7 @@ from app.workers.celery_app import celery_app
 from app.workers.jobs import (
     ProcessingJobsJournal,
     get_sync_sessions,
+    load_tenant_prototypes,
     load_version_context,
     mark_document_failed,
     mark_document_held,
@@ -382,6 +388,8 @@ def _embed_body(ctx: PipelineCtx) -> None:
 
 def _classify_body(ctx: PipelineCtx) -> None:
     payload = _read_derived_json(_require_sha256(ctx))
+    tenant_id = uuid.UUID(ctx["tenant_id"])
+    prototypes = load_tenant_prototypes(_sessions(), tenant_id)
     outcome = run_classification(
         _require(payload, "text", str),
         Taxonomy.default(),
@@ -390,6 +398,8 @@ def _classify_body(ctx: PipelineCtx) -> None:
         # Reuse of the embed stage's vector; re-encoding here would be a second
         # pass over the same text with the same model, i.e. a bug (#6).
         embedding=_derived_embedding(payload),
+        prototypes=prototypes,
+        prototype_threshold=prototype_threshold_from_env(),
     )
     record_classification(
         _sessions(),

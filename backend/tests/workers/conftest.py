@@ -123,6 +123,7 @@ class FakePipelineStore:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for name in (
             "load_version_context",
+            "load_tenant_prototypes",
             "promote_blob_record",
             "replace_keywords",
             "record_classification",
@@ -132,6 +133,11 @@ class FakePipelineStore:
             "mark_document_held",
         ):
             monkeypatch.setattr(tasks, name, getattr(self, name))
+
+    def load_tenant_prototypes(
+        self, sessions: object, tenant_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, list[float]]]:
+        return []
 
     def load_version_context(
         self, sessions: object, document_id: uuid.UUID, version_id: uuid.UUID
