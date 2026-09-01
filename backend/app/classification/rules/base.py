@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import ClassVar, Final
+from typing import Final
 
 from app.domain.models import Finding
 
@@ -48,9 +48,17 @@ class Recognizer(ABC):
     #: Mirrors the module-level WINDOW; kept on the class for scanner call sites.
     WINDOW: Final[int] = 50
 
-    entity_type: ClassVar[str]
-    pattern: ClassVar[re.Pattern[str]]
-    context_words: ClassVar[list[str]]
+    @property
+    @abstractmethod
+    def entity_type(self) -> str: ...
+
+    @property
+    @abstractmethod
+    def pattern(self) -> re.Pattern[str]: ...
+
+    @property
+    @abstractmethod
+    def context_words(self) -> list[str]: ...
 
     @abstractmethod
     def validate(self, match_text: str) -> bool:
