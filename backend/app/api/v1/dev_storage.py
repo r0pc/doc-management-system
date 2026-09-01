@@ -27,6 +27,7 @@ from starlette.responses import StreamingResponse
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_413_CONTENT_TOO_LARGE
 
 from app.api import deps
+from app.api.v1.content_safety import SAFE_CONTENT_HEADERS, safe_inline_delivery
 from app.api.v1.documents import _stream_handle
 from app.config import Settings
 from app.storage.base import Storage
@@ -66,10 +67,16 @@ async def get_dev_object(
         media_type = sniff_mime(head)
     except (OSError, ValueError):
         media_type = "application/octet-stream"
-    headers: dict[str, str] = {"Content-Length": str(_content_length(handle))}
-    if filename:
-        safe_name = filename.replace('"', "")
-        headers["Content-Disposition"] = f'inline; filename="{safe_name}"'
+    # The presign HMAC covers METHOD:key:expires and NOT this filename, so it
+    # is attacker-controlled on any otherwise-valid URL. Stripping quotes alone
+    # left CR/LF free to split the header. Sanitise, and refuse to render
+    # anything scriptable inline regardless of what the sniffer returned.
+    media_type, disposition = safe_inline_delivery(media_type, filename or "download")
+    headers: dict[str, str] = {
+        "Content-Length": str(_content_length(handle)),
+        "Content-Disposition": disposition,
+        **SAFE_CONTENT_HEADERS,
+    }
     return StreamingResponse(
         _stream_handle(handle),
         media_type=media_type,

@@ -47,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_416_RANGE_NOT_SATISFIABLE
 
 from app.api import deps
+from app.api.v1.content_safety import SAFE_CONTENT_HEADERS, safe_inline_delivery
 from app.api.v1.errors import not_found
 from app.classification.pipeline import ml_threshold_from_env
 from app.config import Settings
@@ -934,10 +935,17 @@ async def view_document_content(
             byte_range = parse_range(request.headers.get("range"), total)
             handle = storage.open(view.blob_key, byte_range=byte_range)
             length = total if byte_range is None else byte_range[1] - byte_range[0] + 1
+            # A blob is promoted during the scan stage and keeps its sniffed
+            # mime even when extraction later fails, so text/html and
+            # image/svg+xml blobs DO reach this route. Served inline they
+            # execute, and the frontend's blob: URL inherits the app's origin.
+            # Default-deny: only non-scriptable types stay inline.
+            media_type, disposition = safe_inline_delivery(view.blob_mime, view_name)
             headers = {
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(length),
-                "Content-Disposition": f'inline; filename="{view_name}"',
+                "Content-Disposition": disposition,
+                **SAFE_CONTENT_HEADERS,
             }
             status = 200
             if byte_range is not None:
@@ -956,7 +964,7 @@ async def view_document_content(
             return StreamingResponse(
                 _stream_handle(handle),
                 status_code=status,
-                media_type=view.blob_mime or "application/octet-stream",
+                media_type=media_type,
                 headers=headers,
             )
         url = storage.presign(
