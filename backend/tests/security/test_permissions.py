@@ -16,6 +16,10 @@ EXPECTED_MATRIX: dict[str, frozenset[Action]] = {
             Action.RECLASSIFY,
             Action.RESOLVE_REVIEW,
             Action.VIEW_AUDIT,
+            # Deletion hides a document from every query and from search, so
+            # it sits with the other label-altering security actions rather
+            # than with upload. dept_manager and below cannot delete.
+            Action.DELETE,
         }
     ),
     "dept_manager": frozenset(

@@ -22,6 +22,7 @@ ROLE_ACTIONS: Final[dict[str, frozenset[Action]]] = {
             Action.RECLASSIFY,
             Action.RESOLVE_REVIEW,
             Action.VIEW_AUDIT,
+            Action.DELETE,
         }
     ),
     "dept_manager": frozenset(

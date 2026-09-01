@@ -11,7 +11,10 @@ import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { DocumentDrawer } from './DocumentDrawer';
 import { ReclassifyModal } from './ReclassifyModal';
 import { formatDate } from '../../lib/utils';
-import { FileText, Eye, Filter, RefreshCw, Plus, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { FileText, Eye, Filter, RefreshCw, Plus, ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { usePermissions } from '../../security/usePermissions';
+import { Action } from '../../security/permissions';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
@@ -25,6 +28,27 @@ export const DocumentsPage: React.FC = () => {
   
   const [cursors, setCursors] = useState<string[]>([]);
   const currentCursor = cursors[cursors.length - 1] ?? undefined;
+
+  const { can } = usePermissions();
+  const canDelete = can(Action.DELETE);
+  const queryClient = useQueryClient();
+  // Selection is keyed by id and scoped to what is currently rendered: paging
+  // or filtering clears it, so a "delete 3" can never act on rows the user has
+  // since navigated away from and can no longer see.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
+
+  const clearSelection = () => setSelected(new Set());
+
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
 
   const setStatusFilter = (val: string) => {
     const newParams = new URLSearchParams(searchParams);
@@ -99,6 +123,34 @@ export const DocumentsPage: React.FC = () => {
     : documentsData?.items || [];
   const nextCursor = !Array.isArray(documentsData) ? documentsData?.next_cursor : null;
 
+  // Paging or filtering changes which rows exist; a stale selection would let
+  // a confirmed delete act on documents the user can no longer see.
+  React.useEffect(() => {
+    clearSelection();
+  }, [statusFilter, levelFilter, currentSort, currentDirection, currentCursor]);
+
+  const visibleIds = documents.map((d: DocumentListItem) => d.id);
+  const selectedVisible = visibleIds.filter((id: string) => selected.has(id));
+  const allSelected = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
+  const someSelected = selectedVisible.length > 0 && !allSelected;
+
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(visibleIds));
+
+  const deleteMutation = useMutation({
+    mutationFn: (ids: string[]) => api.post('/v1/documents/delete', { document_ids: ids }),
+    onSuccess: () => {
+      setConfirming(false);
+      clearSelection();
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+    onError: (err: unknown) => {
+      // Keep the selection so the user can retry without re-picking rows.
+      setConfirming(false);
+      setDeleteError(err);
+    },
+  });
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -135,6 +187,23 @@ export const DocumentsPage: React.FC = () => {
           <Filter className="w-3.5 h-3.5" />
           <span>Filters:</span>
         </div>
+
+        {canDelete && selectedVisible.length > 0 && (
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-xs text-[#656d76] dark:text-[#848d97]">
+              {selectedVisible.length} selected
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="delete-selected"
+              onClick={() => setConfirming(true)}
+              className="h-7 px-2 text-[11px] text-[#cf222e] dark:text-[#f85149] border-[#ff8182]/50 hover:bg-[#ffebe9] dark:hover:bg-[#da3633]/20"
+            >
+              <Trash2 className="w-3 h-3 mr-1" /> Delete {selectedVisible.length}
+            </Button>
+          </div>
+        )}
 
         <select
           value={statusFilter}
@@ -200,6 +269,23 @@ export const DocumentsPage: React.FC = () => {
           <Table data-testid="documents-table">
             <TableHeader>
               <TableRow>
+                {canDelete && (
+                  <TableHead className="w-8">
+                    <input
+                      type="checkbox"
+                      data-testid="select-all"
+                      aria-label="Select all documents on this page"
+                      className="cursor-pointer align-middle"
+                      checked={allSelected}
+                      ref={(el) => {
+                        // Indeterminate is not an attribute — it only exists as
+                        // a DOM property, so it has to be set on the node.
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={toggleAll}
+                    />
+                  </TableHead>
+                )}
                 <TableHead className="w-[35%]">
                   <button
                     type="button"
@@ -258,6 +344,20 @@ export const DocumentsPage: React.FC = () => {
                   className="cursor-pointer hover:bg-[#f6f8fa] dark:hover:bg-[#161b22]"
                   onClick={() => setSelectedDocId(doc.id)}
                 >
+                  {canDelete && (
+                    // stopPropagation: the row opens the drawer on click, and
+                    // ticking a checkbox must not also open it.
+                    <TableCell className="w-8" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        data-testid="row-select"
+                        aria-label={`Select ${doc.filename}`}
+                        className="cursor-pointer align-middle"
+                        checked={selected.has(doc.id)}
+                        onChange={() => toggleOne(doc.id)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2 text-[#0969da] dark:text-[#2f81f7] hover:underline">
                       <FileText className="w-3.5 h-3.5 text-[#656d76] dark:text-[#848d97] shrink-0" />
@@ -328,6 +428,58 @@ export const DocumentsPage: React.FC = () => {
       </div>
 
       {/* Drawer */}
+      {confirming && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(1,4,9,0.75)] p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-delete-title"
+        >
+          <div className="w-full max-w-md rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#161b22] p-5 shadow-2xl">
+            <h2
+              id="confirm-delete-title"
+              className="text-sm font-semibold text-[#1f2328] dark:text-[#e6edf3]"
+            >
+              Delete {selectedVisible.length} document
+              {selectedVisible.length === 1 ? '' : 's'}?
+            </h2>
+            <p className="mt-2 text-xs text-[#656d76] dark:text-[#848d97]">
+              They stop appearing in listings, search and review. The audit
+              trail and classification history are retained, so this is
+              recorded rather than erased — but there is no undo in the UI.
+            </p>
+            {deleteError != null && (
+              <div className="mt-3">
+                <ProblemAlert error={deleteError} />
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="cancel-delete"
+                onClick={() => setConfirming(false)}
+                className="h-7 px-3 text-[11px]"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                data-testid="confirm-delete"
+                disabled={deleteMutation.isPending}
+                onClick={() => {
+                  setDeleteError(null);
+                  deleteMutation.mutate(selectedVisible);
+                }}
+                className="h-7 px-3 text-[11px] bg-[#cf222e] hover:bg-[#a40e26] text-white"
+              >
+                {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <DocumentDrawer
         documentId={selectedDocId}
         onClose={() => setSelectedDocId(null)}

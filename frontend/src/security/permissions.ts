@@ -7,6 +7,7 @@ export enum Action {
   RESOLVE_REVIEW = 'resolve_review',
   MANAGE_TAXONOMY = 'manage_taxonomy',
   VIEW_AUDIT = 'view_audit',
+  DELETE = 'delete',
 }
 
 export type Role = 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
@@ -21,6 +22,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Action[]> = {
     Action.RESOLVE_REVIEW,
     Action.MANAGE_TAXONOMY,
     Action.VIEW_AUDIT,
+    Action.DELETE,
   ],
   security_officer: [
     Action.UPLOAD,
@@ -30,6 +32,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Action[]> = {
     Action.RECLASSIFY,
     Action.RESOLVE_REVIEW,
     Action.VIEW_AUDIT,
+    Action.DELETE,
   ],
   dept_manager: [
     Action.UPLOAD,

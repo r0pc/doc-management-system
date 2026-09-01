@@ -173,6 +173,22 @@ class ReclassifyRequest(BaseModel):
     justification: str | None = Field(None, max_length=1000)
 
 
+class DeleteRequest(BaseModel):
+    document_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class DeleteResponse(BaseModel):
+    """Only what was actually deleted.
+
+    #31: a caller must not learn whether an id they could not delete was
+    foreign, nonexistent, or denied. Reporting those separately would turn this
+    route into an existence oracle over other tenants, so anything not deleted
+    is simply absent from the response.
+    """
+
+    deleted: list[uuid.UUID]
+
+
 class LabelView(BaseModel):
     document_id: uuid.UUID
     level: str
@@ -724,6 +740,92 @@ async def _close_pending_reviews(session: AsyncSession, document_id: uuid.UUID) 
 
 
 # --- handlers ---
+
+
+async def _fetch_deletable_document_ids(
+    session: AsyncSession, user: UserCtx, document_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
+    """The subset of ``document_ids`` this caller may actually delete.
+
+    Filters on the same two axes every other read does (#25) and skips rows
+    already deleted, so a repeat call is a no-op rather than a second audit
+    row. Anything foreign, missing or denied simply does not come back.
+    """
+    stmt = (
+        select(Document.id)
+        .join(
+            Classification,
+            Document.current_classification_id == Classification.id,
+            isouter=True,
+        )
+        .join(SecurityLevel, Classification.level_id == SecurityLevel.id, isouter=True)
+        .where(
+            Document.id.in_(document_ids),
+            Document.tenant_id == user.tenant_id,
+            Document.deleted_at.is_(None),
+            func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK) <= user.clearance_rank,
+        )
+    )
+    if user.visible_department_ids:
+        stmt = stmt.where(
+            or_(
+                Document.department_id.is_(None),
+                Document.department_id.in_(user.visible_department_ids),
+            )
+        )
+    else:
+        stmt = stmt.where(Document.department_id.is_(None))
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def _soft_delete_documents(session: AsyncSession, document_ids: list[uuid.UUID]) -> None:
+    """Stamp ``deleted_at``. Never a hard delete.
+
+    classifications.document_id is a foreign key into an append-only table
+    (#20) and the app role holds no DELETE grant on access_log (#24), so
+    removing the row is neither possible nor desirable. Every read path
+    already filters on deleted_at IS NULL.
+    """
+    await session.execute(
+        update(Document).where(Document.id.in_(document_ids)).values(deleted_at=func.now())
+    )
+
+
+@router.post("/delete", response_model=DeleteResponse)
+async def delete_documents(
+    request: Request,
+    payload: DeleteRequest,
+    user: UserCtx = Depends(deps.require(Action.DELETE)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> DeleteResponse:
+    """Soft-delete a selection of documents.
+
+    Registered before ``/{document_id}`` reads it as a path parameter; the
+    method differs so there is no capture, but keep it above them regardless.
+
+    The audit rows and the deletion share one transaction (#30), and only ids
+    that were genuinely deleted are audited or returned (#31).
+    """
+    # Deduplicate but keep the caller's order, so the response reads back the
+    # way the selection was made.
+    unique_ids = list(dict.fromkeys(payload.document_ids))
+    async with sessions(user.tenant_id) as session:
+        deletable = await _fetch_deletable_document_ids(session, user, unique_ids)
+        if deletable:
+            await _soft_delete_documents(session, deletable)
+            actor_id = await deps.provision_actor(session, user)
+            for document_id in deletable:
+                await deps.record_audit(
+                    session,
+                    tenant_id=user.tenant_id,
+                    document_id=document_id,
+                    actor_id=actor_id,
+                    action="document.delete",
+                    request=request,
+                )
+        await session.commit()
+    ordered = [d for d in unique_ids if d in set(deletable)]
+    return DeleteResponse(deleted=ordered)
 
 
 @router.get("", response_model=DocumentPage)

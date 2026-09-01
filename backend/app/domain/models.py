@@ -93,3 +93,4 @@ class Action(StrEnum):
     RESOLVE_REVIEW = "resolve_review"
     MANAGE_TAXONOMY = "manage_taxonomy"
     VIEW_AUDIT = "view_audit"
+    DELETE = "delete"
