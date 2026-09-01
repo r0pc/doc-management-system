@@ -77,6 +77,10 @@ backend/app/
   extraction/        registry.py, pdf.py, docx.py, xlsx.py, ocr.py, keywords.py
   search/            hybrid.py, filters.py
   classification/    pipeline.py, rules/, ml/, llm/
+                     rules/configured.py  (admin-defined recognisers, #10)
+                     rules/validators.py  (structural validators)
+                     rules/safety.py      (ReDoS guard for admin patterns)
+                     ml/prototypes.py     (few-shot doc-type centroids)
   security/          auth.py, permissions.py, audit.py
   workers/           celery_app.py, tasks.py, jobs.py
 frontend/src/
