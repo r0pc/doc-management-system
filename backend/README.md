@@ -51,21 +51,26 @@ backend/app/
       review.py          # Review queue listing, human resolution (S4), check_monotonic
       search.py          # Hybrid keyword + vector search with pre-filtering (Invariants #27, #28)
       audit.py           # Read-only audit log inspection (Invariant #24)
-      admin.py           # Taxonomy management (DocType / SecurityLevel CRUD)
+      admin.py           # Taxonomy, prototype trainer, and detector rules CRUD/preview
       events.py          # 501 SSE placeholder
       dev_storage.py     # Local storage presigned URL dispatcher
       errors.py          # Uniform RFC 7807 problem details & cross-tenant 404 parity (#31)
   classification/
-    pipeline.py          # Stage coordination: rules -> ml -> review queue
+    pipeline.py          # Stage coordination: rules -> prototypes -> ml -> review queue
     rules/
       base.py            # Base recognizer interface & context-scoring window
-      recognizers.py     # Luhn card, CNIC province, IBAN, Passport recognizers
+      recognizers.py     # Builtin Luhn card, CNIC province, IBAN, Passport recognizers
+      configured.py      # Configurable tenant recognizers with structural validators (#10)
+      validators.py      # Structural validator registry (luhn, mod97, entropy, prefix_charset, checksum_suffix)
+      safety.py          # ReDoS static analysis & regex canary execution guard
     ml/
       loader.py          # CalibratedClassifierCV v1 artifact contract loader
+      prototypes.py      # Few-shot centroid vector computation & cosine similarity
   db/
     base.py              # DeclarativeBase with strict naming conventions
     models.py            # 16 spec §6 SQLAlchemy models (deferred FK #22, non-PK rank #23)
     session.py           # AsyncEngine & tenant session opener with RLS GUC binding
+    pagination.py        # Keyset cursor pagination with arbitrary column sort (#32)
   domain/
     policy.py            # Pure two-axis access control & monotonic aggregation (#8, #25)
     taxonomy.py          # Entity-to-rank mappings & CNIC threshold constants

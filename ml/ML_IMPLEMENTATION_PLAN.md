@@ -138,11 +138,13 @@ def compose_vector_subquery(query_embedding: list[float], limit: int = 50):
 
 ---
 
-## 5. Phase 4: Few-Shot Dynamic Category Prototypes
+## 5. Phase 4: Few-Shot Dynamic Category Prototypes [IMPLEMENTED]
 
-### 5.1 Database Migration (`alembic/versions/0005_custom_doc_type_prototypes.py`)
+*(Implemented in Phase 2 via migration `0006_admin_extensibility.py`, `backend/app/classification/ml/prototypes.py`, `backend/app/api/v1/admin.py`, and `backend/app/classification/pipeline.py`)*
+
+### 5.1 Database Migration (`alembic/versions/0006_admin_extensibility.py`)
 ```python
-"""Add tenant-specific custom doc_types and prototype centroid vectors."""
+"""Add tenant-specific custom doc_types, prototype centroid vectors, and detector rules."""
 
 def upgrade() -> None:
     # 1. Add tenant_id to doc_types (nullable for global types)
