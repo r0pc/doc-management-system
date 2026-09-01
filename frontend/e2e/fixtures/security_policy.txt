@@ -1,0 +1,14 @@
+ACME CORPORATION - INFORMATION SECURITY POLICY
+Department: Information Security & Compliance
+Date: August 2026
+
+1. Purpose and Scope
+This policy outlines the baseline operational security practices for all internal personnel.
+All staff members must adhere to access control protocols and protect company assets.
+
+2. Access Control
+Access to systems and document repositories is granted according to role and department clearance.
+Sharing credentials is strictly prohibited under disciplinary penalty.
+
+3. Document Handling
+Documents containing general internal workflows must be stored in secure document repositories.

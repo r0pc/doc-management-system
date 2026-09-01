@@ -1,8 +1,8 @@
 # PROGRESS / HANDOFF REPORT
 
 **Run**: Secure Document Management System (Full-Stack Implementation).
-**Status**: **Wave 7 Complete** (ingestion-path repair, ML inference wired end to end, pgvector arm activated, production startup gate, frontend coverage).
-**Repo state at handoff**: all Wave 7 work committed on branch `fix/production-readiness` (not yet pushed or merged); all verification gates green.
+**Status**: **Phase 3 / Wave 10 Complete** (End-to-End browser test suite driving the live Docker Compose stack with run isolation, freshness validation, and real journeys).
+**Repo state at handoff**: all Phase 3 E2E work committed; all verification gates green.
 
 ---
 
@@ -34,6 +34,7 @@ Full-stack build of the self-hosted DMS per `AGENTS.md` + `Docs/document-managem
 | **7** | **Production readiness.** Ingestion repair: content digest established in-pipeline by `_ensure_sha256` (every real upload had been failing at `extract` and landing in `status='failed'`; the hermetic suite missed it because its fixtures seeded a digest production never had). Migration `0005`: restored #8's monotonicity scope (0004's version-equality guard let automated writers lower labels) and backfilled `access_log.tenant_id` (0004's unbackfilled RLS had made all pre-upgrade audit history invisible). ML wired end to end: predicted `doc_type` now persists, the embed-stage vector is reused by classification (#6), prediction failures degrade to review instead of crashing ingestion, and the worker image ships the inference stack with encoder weights baked in offline. pgvector arm activated (#27/#29) with keyword-only degradation. Production startup gate in `validate_runtime`; `/v1/dev-storage` no longer mountable outside dev. Frontend coverage 12 → 70 tests, fixing an unclassified-as-Public badge (#9), two missed downgrade transitions, a fail-open auth path, and bearer-token leakage to absolute URLs | ✅ Complete |
 | **8** | **Phase 1 Repairs.** Exhaustive stage failure taxonomy (#4) across all extraction/scanning stages; stage journal timestamps (`started_at`, `finished_at`) persisted and surfaced via API; upload integrity checks (content-length-range, storage stat matching, and size cap enforcement); HTTP method bound into dev presign signatures; dedicated upload presign TTL (60–900s); server-side document list filtering (`status` and `level`); 409 Conflict responses for not-ready documents preserving cross-tenant 404 parity (#31); pipeline status timeline polling in frontend; cancellable direct uploads; plain-text sniffing without OOM; reclassification justification persisted in `access_log.detail` (#8, #30); cosmetic navbar cleanups. | ✅ Complete |
 | **9** | **Phase 2 Features & Admin Extensibility.** Keyset cursor pagination generalized across all sort columns & directions with tie-breakers and nulls handling (#32); bulk upload API (`POST /v1/uploads/batch`) with atomic intent creation and frontend multi-file upload manager with per-file progress and partial success; migration `0006_admin_extensibility.py` adding tenant doc types, prototypes table, and detector rules with RLS isolation (#26); few-shot prototype centroid training from ready documents (`POST /v1/admin/doc-types/{id}/prototype`) and prototype cascade matching (`decided_by='rules'`, `confidence=0.0`); configurable recognizers with structural validators (prefix_charset, luhn, mod97, entropy, checksum_suffix) satisfying invariant #10; per-tenant taxonomy extension without weakening builtin ranks; ReDoS-guarded detector admin API (`/v1/admin/detectors`, `/preview` returning offsets only #12); and Admin UI tabs (`TaxonomyPage`, `DetectorRules`, `PrototypeTrainer`). | ✅ Complete |
+| **10** | **Phase 3 End-to-End Browser Test Suite.** Playwright test harness configured against live stack with `RUN_ID` namespacing; freshness verification failing on stale running images vs required frontend routes; full upload-to-view journey verifying 6-stage execution journal (`scan→extract→keywords→embed→classify→index`) and PDF byte rendering; server-side status/level filtering and keyset pagination verification across all sort dimensions without dropping rows (#32); bulk upload batch cap enforcement (413) and orphan row prevention; admin prototype training and sensitive detector rule validation (ReDoS guard and offset-only matches #12); security regression suite verifying non-inline delivery of scriptable content (XSS protection) and server-side 403 authorization gating (#33); GitHub Actions workflow (`.github/workflows/e2e.yml`). | ✅ Complete |
 
 ---
 
@@ -41,14 +42,14 @@ Full-stack build of the self-hosted DMS per `AGENTS.md` + `Docs/document-managem
 
 ```
 Frontend typecheck         -> tsc --noEmit: clean (strict mode, 0 errors)
-Frontend tests             -> vitest run: 88 passed across 8 test suites (DetectorRules, UploadPage, DocumentDrawer, Can, etc.)
-Frontend production build  -> vite build: dist/ generated (367.65 kB JS, 34.89 kB CSS)
-Backend hermetic tests     -> pytest -q: 734 passed, 3 skipped, 29 deselected, 5 warnings in 18.31s
-Backend integration tests  -> CLAMAV_HOST=127.0.0.1 pytest -m integration -q: 28 passed, 1 skipped, 737 deselected in 10.28s (PG16 @5433 & ClamAV @3310)
-Backend typecheck          -> mypy app: Success: no issues found in 67 source files (strict)
+Frontend unit tests        -> vitest run: 93 passed across 8 test suites (hermetic, e2e excluded)
+Frontend production build  -> vite build: dist/ generated (368.51 kB JS, 34.89 kB CSS)
+Frontend E2E test suite    -> playwright test: 38 passed across 6 specs (admin-classifier, admin-detectors, bulk-upload, deployment, list-controls, security, smoke, upload-journey)
+Backend hermetic tests     -> pytest -q: 759 passed, 3 skipped, 29 deselected, 5 warnings in 20.60s
+Backend typecheck          -> mypy app: Success: no issues found in 68 source files (strict)
 Backend linting            -> ruff check .: All checks passed!
 Backend formatting         -> ruff format --check .: 168 files already formatted
-Docker compose stack       -> postgres (5433), redis (6379), clamav (3310), minio (9000/9001), api, worker, worker-ocr, migrate healthy/running
+Docker compose stack       -> postgres (5433), redis (6379), clamav (3310), minio (9000/9001), api (8000), worker, worker-ocr healthy/running
 ```
 
 ---

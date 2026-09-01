@@ -4,8 +4,8 @@ import { test, expect, API, prefix } from './fixtures';
 import { uploadDocument } from './helpers/documents';
 import { waitForTerminalStatus } from './helpers/api';
 
-const SAMPLES = fileURLToPath(new URL('../../data/sample_documents', import.meta.url));
-const PDF = path.join(SAMPLES, 'rendered_reports_and_hr/disciplinary_notice_1.pdf');
+const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
+const PDF = path.join(FIXTURES, 'disciplinary_notice_1.pdf');
 
 test.describe('upload to view', () => {
   test('a PDF uploads, processes to ready, and serves real bytes', async ({
@@ -64,7 +64,7 @@ test.describe('upload to view', () => {
     // The reason lived in processing_jobs.error, was serialised by the API, and
     // was then discarded by the renderer — "Failed" with no explanation.
     const name = prefix('broken.pdf');
-    const bad = path.join(SAMPLES, 'security_policy.txt');
+    const bad = path.join(FIXTURES, 'security_policy.txt');
     const id = await uploadDocument(request, adminToken, bad, name, 'application/pdf');
     const status = await waitForTerminalStatus(request, adminToken, id);
     expect(['failed', 'ready']).toContain(status);

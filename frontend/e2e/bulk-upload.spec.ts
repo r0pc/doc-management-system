@@ -2,8 +2,8 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, API, prefix } from './fixtures';
 
-const SAMPLES = fileURLToPath(new URL('../../data/sample_documents', import.meta.url));
-const PDF = path.join(SAMPLES, 'rendered_reports_and_hr/disciplinary_notice_1.pdf');
+const FIXTURES = fileURLToPath(new URL('./fixtures', import.meta.url));
+const PDF = path.join(FIXTURES, 'disciplinary_notice_1.pdf');
 const MB = 1024 * 1024;
 
 test.describe('bulk upload', () => {

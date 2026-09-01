@@ -52,6 +52,7 @@ under production defaults.
 | Strict typecheck | `mypy app` |
 | ML toolkit tests | `cd ml && pytest tests -q` |
 | End-to-end verification | `bash scripts/e2e.sh` |
+| E2E browser suite | `cd frontend && npm run test:e2e` (requires live stack; rebuild image first if backend changed: `docker compose build api worker worker-ocr && docker compose up -d`) |
 
 ---
 

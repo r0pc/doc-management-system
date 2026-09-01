@@ -85,6 +85,8 @@ backend/app/
   workers/           celery_app.py, tasks.py, jobs.py
 frontend/src/
   api/ features/{documents,review,upload,audit,admin}/ components/ lib/
+frontend/e2e/
+  fixtures.ts, helpers/, *.spec.ts
 docker/clamav/
   clamd.conf         # ClamAV configuration mount
 ```
@@ -164,6 +166,7 @@ Treat each of these as a security control. If a task appears to require violatin
 
 - Any change to access control adds a case to the policy table test.
 - Any new endpoint gets: a permission-check test, an audit-write test where applicable, and a cross-tenant 404 test.
+- Any change to a route the frontend calls updates `REQUIRED_ROUTES` in `frontend/e2e/deployment.spec.ts`.
 - Any migration is reversible and reviewed against the database invariants above.
 - Search changes get a test proving the permission filter runs pre-ranking (result counts must not vary with what the caller cannot see).
 
