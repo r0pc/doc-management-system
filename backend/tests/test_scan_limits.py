@@ -45,3 +45,16 @@ def test_stream_max_length_covers_the_upload_cap() -> None:
 def test_max_file_size_covers_the_upload_cap() -> None:
     cap = _dev_settings().upload_max_bytes
     assert _parse_size(_directive("MaxFileSize")) >= cap
+
+def test_local_socket_is_declared() -> None:
+    """The image's /init blocks until a unix socket exists.
+
+    This file REPLACES the image's clamd.conf. Declaring only TCPSocket means
+    neither /run/clamav/clamd.sock nor /tmp/clamd.sock is ever created, so the
+    container loops "Socket for clamd not found yet" until it times out and
+    every scan fails transiently. Regression guard: this exact omission shipped.
+    """
+    socket_path = _directive("LocalSocket")
+    assert socket_path in ("/run/clamav/clamd.sock", "/tmp/clamd.sock"), (
+        f"LocalSocket={socket_path!r} is not a path the image's /init waits on"
+    )
