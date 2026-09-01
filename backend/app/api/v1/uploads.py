@@ -34,9 +34,10 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import (
+    HTTP_400_BAD_REQUEST,
     HTTP_409_CONFLICT,
     HTTP_413_CONTENT_TOO_LARGE,
     HTTP_422_UNPROCESSABLE_CONTENT,
@@ -46,7 +47,12 @@ from starlette.status import (
 from app.api import deps
 from app.api.v1.errors import not_found
 from app.config import Settings
-from app.db.models import Document, DocumentVersion
+from app.db.departments import (
+    assignable_department_ids,
+    replace_document_departments,
+    root_department_id,
+)
+from app.db.models import Document, DocumentDepartment, DocumentVersion
 from app.domain.models import DEFAULT_FLOOR_RANK, Action, DocumentRef, UserCtx
 from app.domain.policy import can_access
 from app.storage.base import Storage
@@ -65,6 +71,10 @@ class UploadIntentRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=512)
     size_bytes: int = Field(ge=1)
     content_type: str = Field(min_length=1)
+    #: Departments the document should belong to. Omitted means "the uploader's
+    #: own department", which is the pre-existing behaviour. The tenant root is
+    #: always added server-side, so it cannot be omitted by a crafted client.
+    department_ids: list[uuid.UUID] | None = Field(default=None, max_length=50)
 
 
 class CompleteRequest(BaseModel):
@@ -90,6 +100,8 @@ class BatchFileRequest(BaseModel):
 
 class BatchUploadRequest(BaseModel):
     files: list[BatchFileRequest] = Field(min_length=1)
+    #: Applies to every file in the batch; see UploadIntentRequest.
+    department_ids: list[uuid.UUID] | None = Field(default=None, max_length=50)
 
 
 class BatchUploadResponse(BaseModel):
@@ -114,6 +126,8 @@ class QuarantinedDoc:
     original_filename: str
     status: str
     deleted_at: datetime | None
+    #: Every department the document belongs to; empty means tenant-wide.
+    department_ids: frozenset[uuid.UUID] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +144,32 @@ async def _provision_actor(session: AsyncSession, user: UserCtx) -> uuid.UUID:
     return await deps.provision_actor(session, user)
 
 
+async def _resolve_departments(
+    session: AsyncSession, user: UserCtx, requested: list[uuid.UUID] | None
+) -> set[uuid.UUID]:
+    """The department set a new document should be created with.
+
+    The tenant root is added unconditionally rather than validated, so no
+    client — crafted or merely stale — can produce a document the top of the
+    organisation cannot see. Anything else must be assignable by this caller;
+    a request naming a department they cannot see is refused rather than
+    quietly dropped, because silently narrowing a share is its own surprise.
+    """
+    allowed = await assignable_department_ids(session, user)
+    chosen = set(requested) if requested else set()
+    if not chosen and user.department_id is not None:
+        chosen = {user.department_id}
+    if not chosen.issubset(allowed):
+        raise HTTPException(
+            HTTP_400_BAD_REQUEST,
+            "one or more departments are not assignable by this caller",
+        )
+    root = await root_department_id(session, user.tenant_id)
+    if root is not None:
+        chosen.add(root)
+    return chosen
+
+
 async def _insert_quarantine_document(
     session: AsyncSession,
     *,
@@ -137,17 +177,31 @@ async def _insert_quarantine_document(
     user: UserCtx,
     filename: str,
     actor_id: uuid.UUID,
+    department_ids: set[uuid.UUID] | None = None,
 ) -> None:
     await session.execute(
         insert(Document).values(
             id=document_id,
             tenant_id=user.tenant_id,
+            # Still the OWNING department (who uploaded it). Visibility is
+            # decided by document_departments alone.
             department_id=user.department_id,
             original_filename=filename,
             status="quarantined",
             uploaded_by=actor_id,
         )
     )
+    # Membership must be written in the SAME transaction as the row. A document
+    # with no membership rows reads as tenant-wide, so a failure between the two
+    # would widen access rather than narrow it.
+    memberships = department_ids if department_ids is not None else set()
+    if memberships:
+        await replace_document_departments(
+            session,
+            tenant_id=user.tenant_id,
+            document_ids=[document_id],
+            department_ids=memberships,
+        )
 
 
 async def _load_quarantined(session: AsyncSession, upload_id: uuid.UUID) -> QuarantinedDoc | None:
@@ -161,12 +215,18 @@ async def _load_quarantined(session: AsyncSession, upload_id: uuid.UUID) -> Quar
                 Document.original_filename,
                 Document.status,
                 Document.deleted_at,
+                select(func.array_agg(DocumentDepartment.department_id))
+                .where(DocumentDepartment.document_id == Document.id)
+                .scalar_subquery()
+                .label("department_ids"),
             ).where(Document.id == upload_id)
         )
     ).first()
     if row is None:
         return None
-    return QuarantinedDoc(*row)
+    values = list(row)
+    values[-1] = frozenset(values[-1] or ())
+    return QuarantinedDoc(*values)
 
 
 async def _persist_version(
@@ -219,10 +279,12 @@ async def create_upload_intent(
     key = quarantine_key(user.tenant_id, document_id)
     async with sessions(user.tenant_id) as session:
         actor_id = await _provision_actor(session, user)
+        departments = await _resolve_departments(session, user, payload.department_ids)
         await _insert_quarantine_document(
             session,
             document_id=document_id,
             user=user,
+            department_ids=departments,
             filename=payload.filename,
             actor_id=actor_id,
         )
@@ -286,6 +348,9 @@ async def create_batch_upload_intent(
 
     async with sessions(user.tenant_id) as session:
         actor_id = await _provision_actor(session, user)
+        # Resolved once: the whole batch shares one department set, and a bad
+        # set must reject the batch before any row is written.
+        departments = await _resolve_departments(session, user, payload.department_ids)
         for f in payload.files:
             document_id = uuid.uuid4()
             key = quarantine_key(user.tenant_id, document_id)
@@ -293,6 +358,7 @@ async def create_batch_upload_intent(
                 session,
                 document_id=document_id,
                 user=user,
+                department_ids=departments,
                 filename=f.filename,
                 actor_id=actor_id,
             )
@@ -348,7 +414,7 @@ async def complete_upload(
         ref = DocumentRef(
             id=doc.id,
             tenant_id=doc.tenant_id,
-            department_id=doc.department_id,
+            department_ids=doc.department_ids,
             level_rank=DEFAULT_FLOOR_RANK,
             deleted_at=doc.deleted_at,
         )

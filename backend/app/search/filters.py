@@ -20,9 +20,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Select, Subquery, false, func, or_, select
+from sqlalchemy import Select, Subquery, false, func, select
 
 from app.db.models import Classification, DocType, Document, DocumentText, SecurityLevel
+from app.db.visibility import department_clause
 from app.domain.models import DEFAULT_FLOOR_RANK, LevelName, UserCtx
 
 KEYWORD_ARM_LIMIT = 100
@@ -74,14 +75,7 @@ def build_visible_candidates(
 def _department_axis(stmt: Select[Any], user: UserCtx) -> Select[Any]:
     """Axis 2 (#25): department-scoped docs need subtree visibility; docs with
     no owning department are tenant-wide."""
-    if user.visible_department_ids:
-        return stmt.where(
-            or_(
-                Document.department_id.is_(None),
-                Document.department_id.in_(user.visible_department_ids),
-            )
-        )
-    return stmt.where(Document.department_id.is_(None))
+    return stmt.where(department_clause(user))
 
 
 # The visibility predicate above is composed INTO both subqueries below —

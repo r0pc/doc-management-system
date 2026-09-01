@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { DocumentDepartments } from '../departments/DocumentDepartments';
 import { api } from '../../api/client';
 import { DocumentListItem, JobOut, FindingOut, DocumentPreviewOut } from '../../api/types';
 import { LevelBadge } from '../../components/common/LevelBadge';
@@ -298,6 +299,9 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                     </p>
                   </div>
                 )}
+
+                {/* Departments (#25, axis 2) */}
+                <DocumentDepartments doc={doc} />
 
                 {/* Classification Actions */}
                 <div className="space-y-3">

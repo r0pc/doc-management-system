@@ -83,6 +83,11 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>, file = pd
   await user.click(screen.getByRole('button', { name: /start upload/i }));
 }
 
+/** Requests to the upload endpoints, ignoring the departments lookup. */
+const uploadCallsFrom = (mock: { mock: { calls: unknown[][] } }): string[] =>
+  mock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes('/v1/uploads'));
+
+
 describe('UploadPage — invariant #1: the API never touches the bytes', () => {
   it('sends the file body ONLY to the presigned URL, never to the API', async () => {
     fetchMock.mockImplementation((url: string) => {
@@ -161,7 +166,11 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
     await fillAndSubmit(user);
     await waitFor(() => expect(screen.getByText(/upload complete/i)).toBeInTheDocument());
 
-    expect(order).toEqual(['fetch:/v1/uploads', 'fetch:/v1/uploads/up-1/complete']);
+    // The departments lookup populates the picker and is not part of the write
+    // sequence this test pins; filtered out by name so a NEW unexpected request
+    // would still fail here.
+    const writes = order.filter((u) => !u.includes('/v1/departments'));
+    expect(writes).toEqual(['fetch:/v1/uploads', 'fetch:/v1/uploads/up-1/complete']);
     // The PUT is sandwiched between them: `complete` is only called after the
     // storage write resolved.
     expect(RecordingXhr.instances).toHaveLength(1);
@@ -207,7 +216,14 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
     await waitFor(() => expect(screen.getByText(/upload complete/i)).toBeInTheDocument());
 
     const intent = apiJsonBodies()[0] as Record<string, unknown>;
-    expect(Object.keys(intent).sort()).toEqual(['content_type', 'filename', 'size_bytes']);
+    expect(Object.keys(intent).sort()).toEqual([
+      'content_type',
+      // The departments the document will belong to (#25, axis 2). The server
+      // adds the tenant root regardless, so this may be just the root.
+      'department_ids',
+      'filename',
+      'size_bytes',
+    ]);
     expect(intent.filename).toBe('msa.pdf');
     expect(typeof intent.size_bytes).toBe('number');
   });
@@ -215,8 +231,17 @@ describe('UploadPage — invariant #1: the API never touches the bytes', () => {
 
 describe('UploadPage — failure handling', () => {
   it('surfaces an RFC 7807 problem from the intent request and sends no bytes', async () => {
-    fetchMock.mockResolvedValue(
-      problemResponse(403, { title: 'Forbidden', detail: 'You may not upload to that department.' })
+    // A fresh Response per call. `mockResolvedValue` hands the SAME instance to
+    // every caller, and a Response body can only be read once — so the
+    // departments lookup would consume it and the upload would then read an
+    // empty body, losing the problem detail this test asserts on.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        problemResponse(403, {
+          title: 'Forbidden',
+          detail: 'You may not upload to that department.',
+        })
+      )
     );
 
     const user = userEvent.setup();
@@ -253,11 +278,14 @@ describe('UploadPage — failure handling', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(/Storage upload failed with status 403/)
     );
     // A quarantine object that never landed must not be marked complete.
-    expect(fetchMock.mock.calls.map(([u]) => u)).toEqual(['/v1/uploads']);
+    expect(
+      fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => !u.includes('/v1/departments'))
+    ).toEqual(['/v1/uploads']);
   });
 
   it('refuses to send bytes when the intent response has no presigned URL', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ upload_id: 'up-1' }));
+    // Fresh per call, for the same reason as above.
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ upload_id: 'up-1' })));
 
     const user = userEvent.setup();
     renderWithProviders(<UploadPage />);
@@ -278,7 +306,10 @@ describe('UploadPage — failure handling', () => {
     await user.upload(screen.getByLabelText(/document file/i), huge);
 
     expect(screen.getByRole('alert')).toHaveTextContent(/File too large/);
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Scoped to the upload endpoints: the page also fetches /v1/departments on
+    // mount to populate the picker, which is not a write and not what this
+    // test is about.
+    expect(uploadCallsFrom(fetchMock)).toHaveLength(0);
     expect(RecordingXhr.instances).toHaveLength(0);
   });
 });
@@ -349,7 +380,9 @@ describe('UploadPage — bulk upload', () => {
     const input = screen.getByTestId('file-input') as HTMLInputElement;
     await user.upload(input, files);
     expect(await screen.findByText(/exceeds/i)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Scoped to the upload endpoints: the departments lookup fires on mount and
+    // is not "contacting the API" in the sense this test means.
+    expect(uploadCallsFrom(fetchMock)).toHaveLength(0);
   });
 
   it('one failing file does not abort the rest of the batch and reports a partial-success summary', async () => {

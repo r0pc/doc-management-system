@@ -77,7 +77,10 @@ class DocumentRef:
 
     id: uuid.UUID
     tenant_id: uuid.UUID
-    department_id: uuid.UUID | None
+    #: Every department this document belongs to. Empty means tenant-wide.
+    #: A set, not one id: a document may be shared with a second department
+    #: without moving out of the one that owns it.
+    department_ids: frozenset[uuid.UUID]
     level_rank: int
     deleted_at: datetime | None
 
@@ -94,3 +97,4 @@ class Action(StrEnum):
     MANAGE_TAXONOMY = "manage_taxonomy"
     VIEW_AUDIT = "view_audit"
     DELETE = "delete"
+    MANAGE_DEPARTMENTS = "manage_departments"

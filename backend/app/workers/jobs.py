@@ -45,6 +45,7 @@ from app.db.models import (
     ReviewItem,
     SecurityLevel,
 )
+from app.domain.models import DEFAULT_FLOOR_RANK
 
 logger = logging.getLogger(__name__)
 
@@ -388,6 +389,79 @@ def record_classification(
             update(Document)
             .where(Document.id == document_id)
             .values(current_classification_id=classification_id)
+        )
+        return classification_id
+
+
+def record_auto_reclassification(
+    sessions: sessionmaker[Session],
+    *,
+    document_id: uuid.UUID,
+    version_id: uuid.UUID,
+    outcome: ClassificationOutcome,
+) -> uuid.UUID:
+    """Append-only classification write for explicit reclassification runs.
+
+    Enforces monotonicity (Invariant #8): effective level rank is at least the
+    document's current level rank. Updates current_classification_id, adds findings,
+    and sets document status to 'ready'.
+    """
+    with sessions() as session, session.begin():
+        curr_rank = session.execute(
+            select(SecurityLevel.rank)
+            .join(Classification, Classification.level_id == SecurityLevel.id)
+            .join(Document, Document.current_classification_id == Classification.id)
+            .where(Document.id == document_id)
+        ).scalar_one_or_none()
+        current_rank = curr_rank if curr_rank is not None else DEFAULT_FLOOR_RANK
+        effective_rank = max(outcome.level_rank, current_rank)
+
+        level_id = session.execute(
+            select(SecurityLevel.id).where(SecurityLevel.rank == effective_rank)
+        ).scalar_one()
+
+        classification_id = uuid.uuid4()
+        row = Classification(
+            id=classification_id,
+            document_id=document_id,
+            version_id=version_id,
+            level_id=level_id,
+            doc_type_id=resolve_doc_type_id(session, outcome.doc_type),
+            confidence=outcome.confidence,
+            decided_by=outcome.decided_by,
+        )
+        session.add(row)
+        session.flush()
+
+        for finding in outcome.findings:
+            session.add(
+                Finding(
+                    classification_id=classification_id,
+                    entity_type=finding.entity_type,
+                    rule_id=finding.rule_id,
+                    page_no=finding.page_no,
+                    char_start=finding.char_start,
+                    char_end=finding.char_end,
+                    score=finding.score,
+                )
+            )
+
+        if outcome.needs_review:
+            pending = session.execute(
+                select(ReviewItem.id)
+                .where(
+                    ReviewItem.document_id == document_id,
+                    ReviewItem.state == PENDING_REVIEW_STATE,
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if pending is None:
+                session.add(ReviewItem(document_id=document_id, state=PENDING_REVIEW_STATE))
+
+        session.execute(
+            update(Document)
+            .where(Document.id == document_id)
+            .values(current_classification_id=classification_id, status="ready")
         )
         return classification_id
 

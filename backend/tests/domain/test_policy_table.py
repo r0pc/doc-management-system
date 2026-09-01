@@ -44,10 +44,12 @@ def make_doc(
     level_rank: int = 2,
     deleted_at: datetime | None = None,
 ) -> DocumentRef:
+    # `department=None` means tenant-wide, which is now the EMPTY set rather
+    # than a null column. Every case below keeps its original meaning.
     return DocumentRef(
         id=uuid.uuid5(uuid.NAMESPACE_URL, "doc-1"),
         tenant_id=tenant,
-        department_id=department,
+        department_ids=frozenset() if department is None else frozenset({department}),
         level_rank=level_rank,
         deleted_at=deleted_at,
     )

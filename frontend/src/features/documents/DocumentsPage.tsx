@@ -11,10 +11,12 @@ import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { DocumentDrawer } from './DocumentDrawer';
 import { ReclassifyModal } from './ReclassifyModal';
 import { formatDate } from '../../lib/utils';
-import { FileText, Eye, Filter, RefreshCw, Plus, ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Eye, FileText, Filter, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from '../../security/usePermissions';
 import { Action } from '../../security/permissions';
+import { DepartmentPicker } from '../departments/DepartmentPicker';
+import { useDepartments, withRoot } from '../departments/useDepartments';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
@@ -31,6 +33,10 @@ export const DocumentsPage: React.FC = () => {
 
   const { can } = usePermissions();
   const canDelete = can(Action.DELETE);
+  const canReclassify = can(Action.RECLASSIFY);
+  const canManageDepartments = can(Action.MANAGE_DEPARTMENTS);
+  const canSelect = canDelete || canReclassify || canManageDepartments;
+  const { data: departments } = useDepartments(canManageDepartments);
   const queryClient = useQueryClient();
   // Selection is keyed by id and scoped to what is currently rendered: paging
   // or filtering clears it, so a "delete 3" can never act on rows the user has
@@ -38,6 +44,12 @@ export const DocumentsPage: React.FC = () => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
   const [deleteError, setDeleteError] = useState<unknown>(null);
+
+  const [departmentsEditing, setDepartmentsEditing] = useState(false);
+  const [departmentsError, setDepartmentsError] = useState<unknown>(null);
+  const [departmentSelection, setDepartmentSelection] = useState<Set<string>>(new Set());
+  const [autoClassifyConfirming, setAutoClassifyConfirming] = useState(false);
+  const [autoClassifyError, setAutoClassifyError] = useState<unknown>(null);
 
   const clearSelection = () => setSelected(new Set());
 
@@ -151,6 +163,35 @@ export const DocumentsPage: React.FC = () => {
     },
   });
 
+  const departmentsMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      api.post('/v1/documents/departments', {
+        document_ids: ids,
+        // The server adds the root itself and refuses a set without it; sending
+        // it explicitly keeps the request honest about what is being stored.
+        department_ids: withRoot(departmentSelection, departments),
+      }),
+    onSuccess: () => {
+      setDepartmentsEditing(false);
+      clearSelection();
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+    onError: (err: unknown) => setDepartmentsError(err),
+  });
+
+  const autoClassifyMutation = useMutation({
+    mutationFn: (ids: string[]) => api.post('/v1/documents/auto-classify', { document_ids: ids }),
+    onSuccess: () => {
+      setAutoClassifyConfirming(false);
+      clearSelection();
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+    onError: (err: unknown) => {
+      setAutoClassifyConfirming(false);
+      setAutoClassifyError(err);
+    },
+  });
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -188,20 +229,48 @@ export const DocumentsPage: React.FC = () => {
           <span>Filters:</span>
         </div>
 
-        {canDelete && selectedVisible.length > 0 && (
+        {canSelect && selectedVisible.length > 0 && (
           <div className="flex items-center gap-2 ml-auto">
             <span className="text-xs text-[#656d76] dark:text-[#848d97]">
               {selectedVisible.length} selected
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="delete-selected"
-              onClick={() => setConfirming(true)}
-              className="h-7 px-2 text-[11px] text-[#cf222e] dark:text-[#f85149] border-[#ff8182]/50 hover:bg-[#ffebe9] dark:hover:bg-[#da3633]/20"
-            >
-              <Trash2 className="w-3 h-3 mr-1" /> Delete {selectedVisible.length}
-            </Button>
+            {canReclassify && (
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="auto-classify-selected"
+                onClick={() => setAutoClassifyConfirming(true)}
+                className="h-7 px-2 text-[11px] text-[#0969da] dark:text-[#58a6ff] border-[#0969da]/30 hover:bg-[#ddf4ff] dark:hover:bg-[#388bfd]/20"
+              >
+                <Sparkles className="w-3 h-3 mr-1" /> Auto Classify {selectedVisible.length}
+              </Button>
+            )}
+            {canManageDepartments && (
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="set-departments-selected"
+                onClick={() => {
+                  setDepartmentsError(null);
+                  setDepartmentSelection(new Set());
+                  setDepartmentsEditing(true);
+                }}
+                className="h-7 px-2 text-[11px] text-[#1f2328] dark:text-[#e6edf3]"
+              >
+                <Building2 className="w-3 h-3 mr-1" /> Departments {selectedVisible.length}
+              </Button>
+            )}
+            {canDelete && (
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="delete-selected"
+                onClick={() => setConfirming(true)}
+                className="h-7 px-2 text-[11px] text-[#cf222e] dark:text-[#f85149] border-[#ff8182]/50 hover:bg-[#ffebe9] dark:hover:bg-[#da3633]/20"
+              >
+                <Trash2 className="w-3 h-3 mr-1" /> Delete {selectedVisible.length}
+              </Button>
+            )}
           </div>
         )}
 
@@ -269,7 +338,7 @@ export const DocumentsPage: React.FC = () => {
           <Table data-testid="documents-table">
             <TableHeader>
               <TableRow>
-                {canDelete && (
+                {canSelect && (
                   <TableHead className="w-8">
                     <input
                       type="checkbox"
@@ -344,7 +413,7 @@ export const DocumentsPage: React.FC = () => {
                   className="cursor-pointer hover:bg-[#f6f8fa] dark:hover:bg-[#161b22]"
                   onClick={() => setSelectedDocId(doc.id)}
                 >
-                  {canDelete && (
+                  {canSelect && (
                     // stopPropagation: the row opens the drawer on click, and
                     // ticking a checkbox must not also open it.
                     <TableCell className="w-8" onClick={(e) => e.stopPropagation()}>
@@ -474,6 +543,114 @@ export const DocumentsPage: React.FC = () => {
                 className="h-7 px-3 text-[11px] bg-[#cf222e] hover:bg-[#a40e26] text-white"
               >
                 {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {departmentsEditing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(1,4,9,0.75)] p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="set-departments-title"
+        >
+          <div className="w-full max-w-md rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#161b22] p-5 shadow-2xl">
+            <h2
+              id="set-departments-title"
+              className="text-sm font-semibold text-[#1f2328] dark:text-[#e6edf3]"
+            >
+              Set departments for {selectedVisible.length} document
+              {selectedVisible.length === 1 ? '' : 's'}
+            </h2>
+            <p className="mt-2 mb-3 text-xs text-[#656d76] dark:text-[#848d97]">
+              Everyone in a selected department&apos;s subtree will be able to see these
+              documents, subject to their clearance. This replaces the current
+              departments rather than adding to them.
+            </p>
+            <DepartmentPicker
+              selected={departmentSelection}
+              onChange={setDepartmentSelection}
+              disabled={departmentsMutation.isPending}
+            />
+            {departmentsError != null && (
+              <div className="mt-3">
+                <ProblemAlert error={departmentsError} />
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="cancel-set-departments"
+                onClick={() => setDepartmentsEditing(false)}
+                className="h-7 px-3 text-[11px]"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                data-testid="confirm-set-departments"
+                disabled={departmentsMutation.isPending}
+                onClick={() => {
+                  setDepartmentsError(null);
+                  departmentsMutation.mutate(selectedVisible);
+                }}
+                className="h-7 px-3 text-[11px]"
+              >
+                {departmentsMutation.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {autoClassifyConfirming && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(1,4,9,0.75)] p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-auto-classify-title"
+        >
+          <div className="w-full max-w-md rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#161b22] p-5 shadow-2xl">
+            <h2
+              id="confirm-auto-classify-title"
+              className="text-sm font-semibold text-[#1f2328] dark:text-[#e6edf3]"
+            >
+              Auto-classify {selectedVisible.length} document
+              {selectedVisible.length === 1 ? '' : 's'}?
+            </h2>
+            <p className="mt-2 text-xs text-[#656d76] dark:text-[#848d97]">
+              The automated classification pipeline will re-evaluate the selected documents
+              against current detector rules, ML models, and taxonomy. Security levels will not be lowered.
+            </p>
+            {autoClassifyError != null && (
+              <div className="mt-3">
+                <ProblemAlert error={autoClassifyError} />
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="cancel-auto-classify"
+                onClick={() => setAutoClassifyConfirming(false)}
+                className="h-7 px-3 text-[11px]"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                data-testid="confirm-auto-classify"
+                disabled={autoClassifyMutation.isPending}
+                onClick={() => {
+                  setAutoClassifyError(null);
+                  autoClassifyMutation.mutate(selectedVisible);
+                }}
+                className="h-7 px-3 text-[11px] bg-[#0969da] hover:bg-[#0854ad] text-white"
+              >
+                {autoClassifyMutation.isPending ? 'Classifying…' : 'Auto Classify'}
               </Button>
             </div>
           </div>

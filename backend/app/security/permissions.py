@@ -23,6 +23,9 @@ ROLE_ACTIONS: Final[dict[str, frozenset[Action]]] = {
             Action.RESOLVE_REVIEW,
             Action.VIEW_AUDIT,
             Action.DELETE,
+            # NOT Action.MANAGE_DEPARTMENTS. Re-assigning departments widens who
+            # can SEE a document, and the brief put that with the admin alone.
+            # Least privilege: add it here deliberately if that changes.
         }
     ),
     "dept_manager": frozenset(

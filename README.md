@@ -49,8 +49,11 @@ click one rather than typing.
 | `employee@example.test` | `demo-employee` | employee | 2 · Internal | Engineering |
 | `viewer@example.test` | `demo-viewer` | viewer | 1 · Public | Engineering |
 
-Because access is two-axis, a lower-clearance account legitimately sees an
-**empty repository** rather than an error.
+Because access is two-axis, an account legitimately sees an **empty
+repository** rather than an error when nothing clears both axes. Documents
+belong to a *set* of departments and are visible to any of those subtrees, plus
+the mandatory tenant root; an admin can re-assign them from the document drawer
+or the selection toolbar. See [decisions](Docs/decisions.md) entry 14.
 
 This is a dev shim, not an authentication system: `POST /v1/auth/login` is
 mounted only when the API runs with `env=dev`, and `users` has no password

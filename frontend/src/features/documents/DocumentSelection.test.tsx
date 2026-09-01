@@ -8,6 +8,7 @@ import {
   PERSONA_ADMIN,
   PERSONA_VIEWER,
   PERSONA_EMPLOYEE,
+  PERSONA_SECURITY_OFFICER,
 } from '../../test-utils';
 
 /**
@@ -29,6 +30,13 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   fetchMock = vi.fn((url: string) => {
+    if (String(url).includes('/v1/departments'))
+      return Promise.resolve(
+        jsonResponse([
+          { id: 'dept-hq', name: 'HQ', parent_id: null, is_root: true, assignable: true },
+          { id: 'dept-hr', name: 'HR', parent_id: 'dept-hq', is_root: false, assignable: true },
+        ])
+      );
     if (url.startsWith('/v1/documents?') || url === '/v1/documents')
       return Promise.resolve(jsonResponse({ items: DOCS, next_cursor: null }));
     return Promise.resolve(jsonResponse({}));
@@ -140,6 +148,60 @@ describe('DocumentsPage — deletion', () => {
   });
 });
 
+describe('DocumentsPage — auto-classify', () => {
+  it('selecting a row reveals the auto-classify control with a count', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    expect(screen.queryByTestId('auto-classify-selected')).not.toBeInTheDocument();
+
+    await userEvent.click(rowCheckbox('a.pdf'));
+    expect(await screen.findByTestId('auto-classify-selected')).toHaveTextContent(/1/);
+  });
+
+  it('asks for confirmation before auto-classifying', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    await userEvent.click(screen.getByTestId('auto-classify-selected'));
+
+    expect(await screen.findByTestId('confirm-auto-classify')).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter((c) => String(c[0]).includes('/documents/auto-classify'))
+    ).toHaveLength(0);
+  });
+
+  it('posts the selected ids to /v1/documents/auto-classify once confirmed', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    await userEvent.click(rowCheckbox('b.pdf'));
+    await userEvent.click(screen.getByTestId('auto-classify-selected'));
+    await userEvent.click(await screen.findByTestId('confirm-auto-classify'));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) =>
+        String(c[0]).includes('/documents/auto-classify')
+      );
+      expect(call, 'no auto-classify request was sent').toBeTruthy();
+      const body = JSON.parse(String((call![1] as RequestInit).body));
+      expect(body.document_ids).toEqual([DOCS[0].id, DOCS[1].id]);
+    });
+  });
+
+  it('cancelling auto-classify sends nothing and keeps selection', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    await userEvent.click(screen.getByTestId('auto-classify-selected'));
+    await userEvent.click(await screen.findByTestId('cancel-auto-classify'));
+
+    expect(
+      fetchMock.mock.calls.filter((c) => String(c[0]).includes('/documents/auto-classify'))
+    ).toHaveLength(0);
+    expect(screen.getByTestId('auto-classify-selected')).toHaveTextContent(/1/);
+  });
+});
+
 describe('DocumentsPage — deletion is gated (#33 cosmetic)', () => {
   it('a viewer sees no checkboxes and no delete control', async () => {
     renderWithProviders(<DocumentsPage />, { persona: PERSONA_VIEWER });
@@ -147,11 +209,68 @@ describe('DocumentsPage — deletion is gated (#33 cosmetic)', () => {
     expect(screen.queryAllByTestId('row-select')).toHaveLength(0);
     expect(screen.queryByTestId('select-all')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delete-selected')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('auto-classify-selected')).not.toBeInTheDocument();
   });
 
-  it('an employee sees no delete control either', async () => {
+  it('an employee sees no delete or auto-classify control either', async () => {
     renderWithProviders(<DocumentsPage />, { persona: PERSONA_EMPLOYEE });
     await screen.findByTestId('documents-table');
     expect(screen.queryByTestId('select-all')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('delete-selected')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('auto-classify-selected')).not.toBeInTheDocument();
+  });
+});
+
+describe('DocumentsPage — department re-assignment', () => {
+  it('an admin sees the departments control once rows are selected', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    expect(screen.queryByTestId('set-departments-selected')).not.toBeInTheDocument();
+
+    await userEvent.click(rowCheckbox('a.pdf'));
+    expect(await screen.findByTestId('set-departments-selected')).toHaveTextContent(/1/);
+  });
+
+  it('posts the selection with the root always included', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    await userEvent.click(screen.getByTestId('set-departments-selected'));
+
+    // Pick HR only; HQ is the root and must still be sent.
+    const hr = document.querySelector(
+      '[data-testid="department-option"][data-department="HR"]'
+    ) as HTMLInputElement;
+    await userEvent.click(hr);
+    await userEvent.click(screen.getByTestId('confirm-set-departments'));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) =>
+        String(c[0]).includes('/documents/departments')
+      );
+      expect(call, 'no department request was sent').toBeTruthy();
+      const body = JSON.parse(String((call![1] as RequestInit).body));
+      expect(body.document_ids).toEqual([DOCS[0].id]);
+      expect([...body.department_ids].sort()).toEqual(['dept-hq', 'dept-hr']);
+    });
+  });
+
+  it('cancelling sends nothing', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    await userEvent.click(screen.getByTestId('set-departments-selected'));
+    await userEvent.click(screen.getByTestId('cancel-set-departments'));
+
+    expect(
+      fetchMock.mock.calls.filter((c) => String(c[0]).includes('/documents/departments'))
+    ).toHaveLength(0);
+  });
+
+  it('a security officer is not offered it (admin-only, #33 cosmetic)', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_SECURITY_OFFICER });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    expect(screen.queryByTestId('set-departments-selected')).not.toBeInTheDocument();
   });
 });

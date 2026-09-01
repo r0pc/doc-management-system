@@ -42,8 +42,12 @@ def can_access(user: UserCtx, doc: DocumentRef, action: Action) -> bool:
     if user.clearance_rank < doc.level_rank:
         return False
     # Axis 2 ("whose business"): department-scoped docs require visibility;
-    # docs without an owning department are tenant-wide.
-    return doc.department_id is None or doc.department_id in user.visible_department_ids
+    # docs belonging to no department are tenant-wide. A document shared with
+    # several departments is visible to each of them — ANY match admits, which
+    # is what makes sharing possible without moving ownership.
+    if not doc.department_ids:
+        return True
+    return any(dept in user.visible_department_ids for dept in doc.department_ids)
 
 
 def aggregate_level(findings: Sequence[Finding], tax: Taxonomy) -> int:

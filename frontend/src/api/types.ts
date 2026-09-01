@@ -44,6 +44,8 @@ export interface DocumentListItem {
   created_at: string;
   duplicate_of?: string[];
   level_rank?: number | null;
+  /** Departments the document belongs to; empty means tenant-wide. */
+  department_ids?: string[];
 }
 
 export interface DocumentPage {

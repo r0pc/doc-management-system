@@ -63,6 +63,7 @@ from app.workers.jobs import (
     mark_document_held,
     mark_document_ready,
     promote_blob_record,
+    record_auto_reclassification,
     record_classification,
     replace_keywords,
     upsert_document_text,
@@ -654,3 +655,60 @@ def process_upload_chain(
             classify.s(),
             build_index.s(),
         ).apply_async(args=[dict(ctx)])
+
+
+@pipeline_task(bind=True, max_retries=3, autoretry_for=(TransientStorageError,))
+def reclassify_document_task(self: Any, document_id: str, version_id: str) -> None:
+    """Re-run classification for an existing document with the latest rules and ML/prototypes."""
+    journal = _journal()
+    doc_uuid = uuid.UUID(document_id)
+    ver_uuid = uuid.UUID(version_id)
+    job_row_id = journal.mark_running(doc_uuid, ver_uuid, "classify")
+    try:
+        tenant_id, sha256 = load_version_context(_sessions(), doc_uuid, ver_uuid)
+        if sha256 is None:
+            raise ValueError("document version has no content digest")
+
+        payload = _read_derived_json(sha256)
+        text = _require(payload, "text", str)
+        embedding = _derived_embedding(payload)
+
+        tenant_uuid = uuid.UUID(str(tenant_id))
+        prototypes = load_tenant_prototypes(_sessions(), tenant_uuid)
+        tenant_rules = load_tenant_rules(_sessions(), tenant_uuid)
+        custom_ranks = {rule.entity_type: rule.level_rank for rule in tenant_rules}
+        tax = Taxonomy.for_tenant(custom_ranks)
+        recognizers = list(iter_recognizers_for_tenant(tenant_rules))
+
+        outcome = run_classification(
+            text,
+            tax,
+            _artifact(),
+            ml_threshold=ml_threshold_from_env(),
+            embedding=embedding,
+            prototypes=prototypes,
+            prototype_threshold=prototype_threshold_from_env(),
+            recognizers=recognizers,
+        )
+        record_auto_reclassification(
+            _sessions(),
+            document_id=doc_uuid,
+            version_id=ver_uuid,
+            outcome=outcome,
+        )
+        journal.mark_succeeded(job_row_id)
+    except TransientStorageError:
+        if self.request.retries >= self.max_retries:
+            journal.mark_failed(job_row_id, "transient failure in reclassify; retries exhausted")
+            mark_document_failed(_sessions(), document_id=doc_uuid)
+        else:
+            journal.mark_failed(job_row_id, "transient failure in reclassify; retry scheduled")
+        raise
+    except Exception as unexpected:
+        journal.mark_failed(job_row_id, f"unexpected {type(unexpected).__name__} in reclassify")
+        mark_document_failed(_sessions(), document_id=doc_uuid)
+        logger.exception(
+            "reclassify_unexpected_failure",
+            extra={"stage": "classify", "document_id": document_id, "version_id": version_id},
+        )
+        raise

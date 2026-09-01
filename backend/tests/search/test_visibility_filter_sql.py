@@ -72,17 +72,31 @@ def test_candidates_embed_tenant_deletion_and_clearance_axes() -> None:
     assert 3 in compile_params(stmt).values()
 
 
-def test_candidates_department_axis_is_null_or_whitelist() -> None:
+def test_candidates_department_axis_is_unscoped_or_whitelist() -> None:
+    """Membership moved to `document_departments`, so the axis is an EXISTS.
+
+    A document with no rows there is tenant-wide; otherwise ANY of its
+    departments being visible admits it.
+    """
     wide = build_visible_candidates(
         make_user(tenant_id=TENANT, visible_department_ids=(DEPT_1, DEPT_2))
     )
     narrow = build_visible_candidates(make_user(tenant_id=TENANT))
+    wide_sql = compile_sql(wide)
 
-    assert "department_id IS NULL" in compile_sql(wide)
+    # The tenant-wide arm: no membership rows at all.
+    assert "NOT (EXISTS" in wide_sql
+    assert "document_departments.document_id = documents.id" in wide_sql
+    # The whitelist arm, over the join table rather than the documents row.
+    assert "document_departments.department_id IN" in wide_sql
     dept_params = {uuid.UUID(v) for v in param_values(wide) if v.endswith(("d001", "d002"))}
     assert {DEPT_1, DEPT_2}.issubset(dept_params)
-    # No department visibility means only tenant-wide documents.
-    assert compile_sql(narrow).count("department_id IS NULL") == 1
+
+    # No department visibility means ONLY tenant-wide documents: the whitelist
+    # arm must be absent entirely, not merely empty.
+    narrow_sql = compile_sql(narrow)
+    assert "NOT (EXISTS" in narrow_sql
+    assert "document_departments.department_id IN" not in narrow_sql
 
 
 def test_optional_level_and_doc_type_filters_apply_inside_candidates() -> None:

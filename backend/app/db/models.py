@@ -81,6 +81,23 @@ class Department(Base):
     )
 
 
+class DocumentDepartment(Base):
+    """Which departments a document belongs to (#25, axis 2).
+
+    Composite PK, so a document cannot be joined to the same department twice.
+    ``tenant_id`` is denormalised from the document purely so the RLS policy can
+    scope on this table directly instead of joining back to ``documents``.
+    """
+
+    __tablename__ = "document_departments"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    department_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("departments.id"), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+
+
 class User(Base):
     __tablename__ = "users"
 

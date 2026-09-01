@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { UploadIntentResponse, BatchUploadResponse } from '../../api/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
+import { DepartmentPicker } from '../departments/DepartmentPicker';
+import { useDepartments, withRoot } from '../departments/useDepartments';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { ProblemAlert } from '../../components/common/ProblemAlert';
@@ -32,6 +34,10 @@ export const UploadPage: React.FC = () => {
   const [title, setTitle] = useState('');
   const [uploadStage, setUploadStage] = useState<'idle' | 'intent' | 'uploading' | 'completing' | 'done'>('idle');
   const [error, setError] = useState<unknown>(null);
+  // Departments the uploaded documents should belong to. The tenant root is
+  // added by the server regardless, so this holds only the extra choices.
+  const [departmentSelection, setDepartmentSelection] = useState<Set<string>>(new Set());
+  const { data: departments } = useDepartments();
   const [summary, setSummary] = useState<string | null>(null);
 
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,6 +134,7 @@ export const UploadPage: React.FC = () => {
           filename: uploadFilename,
           size_bytes: item.file.size,
           content_type: contentType,
+          department_ids: withRoot(departmentSelection, departments),
         });
 
         if (!intent?.presigned_put?.url) {
@@ -184,6 +191,7 @@ export const UploadPage: React.FC = () => {
           size_bytes: f.file.size,
           content_type: f.file.type || 'application/octet-stream',
         })),
+        department_ids: withRoot(departmentSelection, departments),
       };
 
       const batchResponse = await api.post<BatchUploadResponse>('/v1/uploads/batch', batchPayload);
@@ -319,6 +327,21 @@ export const UploadPage: React.FC = () => {
                 />
               </div>
             )}
+
+            <div>
+              <span className="block text-xs font-semibold text-[#1f2328] dark:text-[#e6edf3] mb-1">
+                Departments
+              </span>
+              <p className="text-[11px] text-[#656d76] dark:text-[#848d97] mb-1.5">
+                Who will be able to see this, subject to their clearance. Applies
+                to every file in this upload.
+              </p>
+              <DepartmentPicker
+                selected={departmentSelection}
+                onChange={setDepartmentSelection}
+                disabled={uploadStage !== 'idle'}
+              />
+            </div>
 
             <div>
               <label

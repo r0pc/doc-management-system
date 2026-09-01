@@ -51,11 +51,17 @@ from app.api.v1.content_safety import SAFE_CONTENT_HEADERS, safe_inline_delivery
 from app.api.v1.errors import not_found
 from app.classification.pipeline import ml_threshold_from_env
 from app.config import Settings
+from app.db.departments import (
+    assignable_department_ids,
+    replace_document_departments,
+    root_department_id,
+)
 from app.db.models import (
     Blob,
     Classification,
     DocType,
     Document,
+    DocumentDepartment,
     DocumentKeyword,
     DocumentVersion,
     Finding,
@@ -64,6 +70,7 @@ from app.db.models import (
     ReviewItem,
     SecurityLevel,
 )
+from app.db.visibility import department_clause
 from app.domain.models import (
     DEFAULT_FLOOR_RANK,
     LEVEL_RANK,
@@ -112,6 +119,10 @@ class DocumentListItem(BaseModel):
     created_at: datetime
     duplicate_of: list[uuid.UUID] = []
     level_rank: int | None = None
+    #: Departments the document belongs to. Populated on BOTH the list and the
+    #: detail route: a field that is silently empty on one of them is the kind
+    #: of "looks populated" bug this codebase keeps finding.
+    department_ids: list[uuid.UUID] = []
 
 
 class DocumentPage(BaseModel):
@@ -173,6 +184,28 @@ class ReclassifyRequest(BaseModel):
     justification: str | None = Field(None, max_length=1000)
 
 
+class AutoClassifyRequest(BaseModel):
+    document_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class AutoClassifyResponse(BaseModel):
+    reclassified: list[uuid.UUID]
+
+
+class SetDepartmentsRequest(BaseModel):
+    document_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    #: The complete set the documents should end up in, not a delta. The tenant
+    #: root must be present; the server refuses the write otherwise.
+    department_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+
+
+class SetDepartmentsResponse(BaseModel):
+    """Only the documents actually re-assigned (#31, as for delete)."""
+
+    updated: list[uuid.UUID]
+    department_ids: list[uuid.UUID]
+
+
 class DeleteRequest(BaseModel):
     document_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
 
@@ -220,6 +253,8 @@ class DocumentView:
     blob_sha256: str | None = None
     decided_by: str | None = None
     confidence: float | None = None
+    #: Every department this document belongs to; empty means tenant-wide.
+    department_ids: frozenset[uuid.UUID] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -467,6 +502,10 @@ async def _fetch_document_page(
             SecurityLevel.name.label("level_name"),
             DocType.name.label("doc_type_name"),
             Document.created_at,
+            select(func.array_agg(DocumentDepartment.department_id))
+            .where(DocumentDepartment.document_id == Document.id)
+            .scalar_subquery()
+            .label("department_ids"),
             SecurityLevel.rank.label("level_rank"),
         )
         .join(
@@ -486,15 +525,7 @@ async def _fetch_document_page(
         stmt = stmt.where(Document.status == status)
     if level is not None:
         stmt = stmt.where(SecurityLevel.name == level)
-    if user.visible_department_ids:
-        stmt = stmt.where(
-            or_(
-                Document.department_id.is_(None),
-                Document.department_id.in_(user.visible_department_ids),
-            )
-        )
-    else:
-        stmt = stmt.where(Document.department_id.is_(None))
+    stmt = stmt.where(department_clause(user))
     if after is not None:
         anchor = after.value if after.value is not None else _null_sentinel(sort_field)
         keyset = tuple_(sort_col, Document.id)
@@ -515,6 +546,7 @@ async def _fetch_document_page(
             doc_type=row.doc_type_name,
             created_at=row.created_at,
             level_rank=row.level_rank,
+            department_ids=list(row.department_ids or ()),
         )
         for row in rows
     ]
@@ -573,6 +605,12 @@ async def _fetch_document_view(
                 DocumentVersion.blob_sha256,
                 Classification.decided_by,
                 Classification.confidence,
+                # Aggregated, not joined: a join would multiply the row per
+                # department and DocumentView unpacks exactly one.
+                select(func.array_agg(DocumentDepartment.department_id))
+                .where(DocumentDepartment.document_id == Document.id)
+                .scalar_subquery()
+                .label("department_ids"),
             )
             .join(
                 Classification,
@@ -598,7 +636,13 @@ async def _fetch_document_view(
     ).first()
     if row is None:
         return None
-    return DocumentView(*row)
+    # array_agg yields NULL, not an empty array, when the document belongs to
+    # no department — which is the tenant-wide case, not an error. Rewriting the
+    # value in place keeps the positional unpack, which is what pins the select
+    # column order to the dataclass field order.
+    values = list(row)
+    values[-1] = frozenset(values[-1] or ())
+    return DocumentView(*values)
 
 
 async def _fetch_keywords(session: AsyncSession, document_id: uuid.UUID) -> list[str]:
@@ -766,15 +810,7 @@ async def _fetch_deletable_document_ids(
             func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK) <= user.clearance_rank,
         )
     )
-    if user.visible_department_ids:
-        stmt = stmt.where(
-            or_(
-                Document.department_id.is_(None),
-                Document.department_id.in_(user.visible_department_ids),
-            )
-        )
-    else:
-        stmt = stmt.where(Document.department_id.is_(None))
+    stmt = stmt.where(department_clause(user))
     return list((await session.execute(stmt)).scalars().all())
 
 
@@ -826,6 +862,158 @@ async def delete_documents(
         await session.commit()
     ordered = [d for d in unique_ids if d in set(deletable)]
     return DeleteResponse(deleted=ordered)
+
+
+@router.post("/departments", response_model=SetDepartmentsResponse)
+async def set_document_departments(
+    request: Request,
+    payload: SetDepartmentsRequest,
+    user: UserCtx = Depends(deps.require(Action.MANAGE_DEPARTMENTS)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> SetDepartmentsResponse:
+    """Replace the departments a selection of documents belongs to.
+
+    Registered above ``/{document_id}`` for the same reason as ``/delete``.
+
+    Two rules are enforced server-side, not merely in the picker. The tenant
+    root must be included, so no document can be scoped out of sight of the top
+    of the organisation. And every department must be one the caller could
+    assign — otherwise a caller could hand a document to a subtree they cannot
+    see, granting access they do not themselves have.
+    """
+    unique_ids = list(dict.fromkeys(payload.document_ids))
+    wanted = set(payload.department_ids)
+
+    async with sessions(user.tenant_id) as session:
+        root = await root_department_id(session, user.tenant_id)
+        if root is None or root not in wanted:
+            raise HTTPException(
+                HTTP_400_BAD_REQUEST,
+                "every document must belong to the root department",
+            )
+        allowed = await assignable_department_ids(session, user)
+        if not wanted.issubset(allowed):
+            # Deliberately does not name which id was rejected: the caller
+            # cannot see those departments, so naming them enumerates the org.
+            raise HTTPException(
+                HTTP_400_BAD_REQUEST,
+                "one or more departments are not assignable by this caller",
+            )
+
+        # Reuse the delete path's visibility filter: a caller may only re-assign
+        # documents they can already see, and foreign ids simply do not come
+        # back (#31).
+        targets = await _fetch_deletable_document_ids(session, user, unique_ids)
+        if targets:
+            await replace_document_departments(
+                session,
+                tenant_id=user.tenant_id,
+                document_ids=targets,
+                department_ids=wanted,
+            )
+            actor_id = await deps.provision_actor(session, user)
+            for document_id in targets:
+                await deps.record_audit(
+                    session,
+                    tenant_id=user.tenant_id,
+                    document_id=document_id,
+                    actor_id=actor_id,
+                    action="document.departments",
+                    request=request,
+                )
+        await session.commit()
+
+    ordered = [d for d in unique_ids if d in set(targets)]
+    return SetDepartmentsResponse(updated=ordered, department_ids=sorted(wanted))
+
+
+async def _fetch_reclassifiable_documents(
+    session: AsyncSession, user: UserCtx, document_ids: list[uuid.UUID]
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """The subset of ``document_ids`` this caller may reclassify, with their current version IDs.
+
+    Filters on the same two axes every other read does (#25) and skips rows
+    deleted or lacking a version. Foreign, missing or denied rows simply do not come back (#31).
+    """
+    stmt = (
+        select(Document.id, DocumentVersion.id)
+        .join(
+            Classification,
+            Document.current_classification_id == Classification.id,
+            isouter=True,
+        )
+        .join(SecurityLevel, Classification.level_id == SecurityLevel.id, isouter=True)
+        .join(
+            DocumentVersion,
+            DocumentVersion.document_id == Document.id,
+        )
+        .where(
+            Document.id.in_(document_ids),
+            Document.tenant_id == user.tenant_id,
+            Document.deleted_at.is_(None),
+            func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK) <= user.clearance_rank,
+        )
+        .order_by(DocumentVersion.version_no.desc())
+    )
+    stmt = stmt.where(department_clause(user))
+    rows = (await session.execute(stmt)).all()
+    seen: set[uuid.UUID] = set()
+    result: list[tuple[uuid.UUID, uuid.UUID]] = []
+    for doc_id, ver_id in rows:
+        if doc_id not in seen:
+            seen.add(doc_id)
+            result.append((doc_id, ver_id))
+    return result
+
+
+async def _mark_documents_processing(session: AsyncSession, document_ids: list[uuid.UUID]) -> None:
+    await session.execute(
+        update(Document).where(Document.id.in_(document_ids)).values(status="processing")
+    )
+
+
+def _enqueue_reclassify(document_id: uuid.UUID, version_id: uuid.UUID) -> None:
+    from app.workers.tasks import reclassify_document_task
+
+    reclassify_document_task.delay(str(document_id), str(version_id))
+
+
+@router.post("/auto-classify", response_model=AutoClassifyResponse)
+async def auto_classify_documents(
+    request: Request,
+    payload: AutoClassifyRequest,
+    user: UserCtx = Depends(deps.require(Action.RECLASSIFY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> AutoClassifyResponse:
+    """Pass selected documents through the automated classification pipeline again.
+
+    The audit rows and status update share one transaction (#30), and only ids
+    that were genuinely eligible are audited or returned (#31).
+    Workers are the automated writer (#2).
+    """
+    unique_ids = list(dict.fromkeys(payload.document_ids))
+    async with sessions(user.tenant_id) as session:
+        eligible = await _fetch_reclassifiable_documents(session, user, unique_ids)
+        doc_ids = [d[0] for d in eligible]
+        if doc_ids:
+            await _mark_documents_processing(session, doc_ids)
+            actor_id = await deps.provision_actor(session, user)
+            for document_id in doc_ids:
+                await deps.record_audit(
+                    session,
+                    tenant_id=user.tenant_id,
+                    document_id=document_id,
+                    actor_id=actor_id,
+                    action="reclassify.auto",
+                    request=request,
+                )
+        await session.commit()
+
+    for doc_id, ver_id in eligible:
+        _enqueue_reclassify(doc_id, ver_id)
+
+    ordered = [d for d in unique_ids if d in set(doc_ids)]
+    return AutoClassifyResponse(reclassified=ordered)
 
 
 @router.get("", response_model=DocumentPage)
@@ -880,7 +1068,7 @@ def _denied(view: DocumentView | None, user: UserCtx, action: Action) -> bool:
     ref = DocumentRef(
         id=view.id,
         tenant_id=view.tenant_id,
-        department_id=view.department_id,
+        department_ids=view.department_ids,
         level_rank=view.level_rank if view.level_rank is not None else DEFAULT_FLOOR_RANK,
         deleted_at=view.deleted_at,
     )
@@ -906,6 +1094,8 @@ async def get_document(
             doc_type=view.doc_type_name,
             created_at=view.created_at,
             duplicate_of=siblings,
+            level_rank=view.level_rank,
+            department_ids=sorted(view.department_ids),
         )
 
 

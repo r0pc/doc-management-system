@@ -9,6 +9,8 @@ from uuid import UUID
 from app.api.v1 import uploads
 from tests.api.conftest import ACTOR_ID
 
+DEPT_ROOT = UUID(int=0xD000)
+
 MB = 1024 * 1024
 GB = 1024 * MB
 
@@ -33,11 +35,26 @@ def patch_batch_persistence(monkeypatch: Any) -> list[dict[str, Any]]:
         user: Any,
         filename: str,
         actor_id: UUID,
+        department_ids: set[UUID] | None = None,
     ) -> None:
-        inserted.append({"id": document_id, "filename": filename, "actor_id": actor_id})
+        inserted.append(
+            {
+                "id": document_id,
+                "filename": filename,
+                "actor_id": actor_id,
+                "department_ids": department_ids,
+            }
+        )
+
+    async def resolve_departments(session: Any, user: Any, requested: Any) -> set[UUID]:
+        # The department lookup is a real SELECT; these tests run on a fake
+        # session. What it resolves to is asserted against a live database in
+        # tests/api/test_document_departments.py.
+        return {DEPT_ROOT}
 
     monkeypatch.setattr(uploads, "_provision_actor", provision)
     monkeypatch.setattr(uploads, "_insert_quarantine_document", insert_doc)
+    monkeypatch.setattr(uploads, "_resolve_departments", resolve_departments)
     return inserted
 
 

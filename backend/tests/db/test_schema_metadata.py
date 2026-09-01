@@ -44,6 +44,9 @@ EXPECTED_TABLES = frozenset(
         "access_log",
         "doc_type_prototypes",
         "detector_rules",
+        # 17th, added deliberately by migration 0007: a document belongs to a
+        # SET of departments, so membership cannot live on the documents row.
+        "document_departments",
     }
 )
 
@@ -68,7 +71,7 @@ def _check_constraint(table_name: str, fragment: str) -> CheckConstraint:
     return checks[0]
 
 
-def test_metadata_declares_exactly_the_sixteen_spec_tables() -> None:
+def test_metadata_declares_exactly_the_expected_tables() -> None:
     assert set(Base.metadata.tables.keys()) == EXPECTED_TABLES
 
 

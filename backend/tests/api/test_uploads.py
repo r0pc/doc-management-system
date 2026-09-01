@@ -21,6 +21,10 @@ from tests.api.conftest import (
     make_user,
 )
 
+#: A stand-in tenant root. The real value comes from the database;
+#: these tests only need the department seam to be non-empty.
+DEPT_ROOT = UUID(int=0xD000)
+
 DOC_ID = UUID(int=0xC0FFEE)
 VERSION_ID = UUID(int=0x7E5710)
 PDF_BYTES = b"%PDF-1.4\nminimal pdf payload\n"
@@ -37,13 +41,22 @@ def patch_intent_persistence(monkeypatch: pytest.MonkeyPatch, captured: dict[str
         user: Any,
         filename: str,
         actor_id: UUID,
+        department_ids: set[UUID] | None = None,
     ) -> None:
+        captured["department_ids"] = department_ids
         captured["document_id"] = document_id
         captured["filename"] = filename
         captured["actor_id"] = actor_id
 
+    async def resolve_departments(session: Any, user: Any, requested: Any) -> set[UUID]:
+        # The department lookup is a real SELECT; these tests run on a fake
+        # session. What it returns is asserted in tests/api/test_document_departments.py.
+        captured["requested_departments"] = requested
+        return {DEPT_ROOT}
+
     monkeypatch.setattr(uploads, "_provision_actor", provision)
     monkeypatch.setattr(uploads, "_insert_quarantine_document", insert_doc)
+    monkeypatch.setattr(uploads, "_resolve_departments", resolve_departments)
 
 
 def patch_complete_persistence(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> None:

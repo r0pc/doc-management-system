@@ -17,6 +17,7 @@ from app.api.v1 import (
     admin,
     audit,
     auth,
+    departments,
     dev_auth,
     dev_storage,
     documents,
@@ -149,6 +150,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(uploads.router, prefix="/v1")
     app.include_router(documents.router, prefix="/v1")
+    app.include_router(departments.router, prefix="/v1")
     app.include_router(search.router, prefix="/v1")
     app.include_router(review.router, prefix="/v1")
     app.include_router(audit.router, prefix="/v1")

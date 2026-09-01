@@ -30,7 +30,7 @@ from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select, tuple_, update
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_409_CONFLICT
@@ -56,6 +56,7 @@ from app.db.models import (
     ReviewItem,
     SecurityLevel,
 )
+from app.db.visibility import department_clause
 from app.domain.models import DEFAULT_FLOOR_RANK, Action, LevelName, UserCtx
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -146,15 +147,7 @@ async def _fetch_review_page(
         .order_by(ReviewItem.created_at.asc(), ReviewItem.id.asc())
         .limit(limit_plus_one)
     )
-    if user.visible_department_ids:
-        stmt = stmt.where(
-            or_(
-                Document.department_id.is_(None),
-                Document.department_id.in_(user.visible_department_ids),
-            )
-        )
-    else:
-        stmt = stmt.where(Document.department_id.is_(None))
+    stmt = stmt.where(department_clause(user))
     if after is not None:
         stmt = stmt.where(tuple_(ReviewItem.created_at, ReviewItem.id) > after)
     rows = (await session.execute(stmt)).all()

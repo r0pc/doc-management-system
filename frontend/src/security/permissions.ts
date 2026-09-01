@@ -8,6 +8,7 @@ export enum Action {
   MANAGE_TAXONOMY = 'manage_taxonomy',
   VIEW_AUDIT = 'view_audit',
   DELETE = 'delete',
+  MANAGE_DEPARTMENTS = 'manage_departments',
 }
 
 export type Role = 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
@@ -23,6 +24,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Action[]> = {
     Action.MANAGE_TAXONOMY,
     Action.VIEW_AUDIT,
     Action.DELETE,
+    // Admin only: re-assigning departments widens who can SEE a document.
+    Action.MANAGE_DEPARTMENTS,
   ],
   security_officer: [
     Action.UPLOAD,
