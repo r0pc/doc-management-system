@@ -24,6 +24,42 @@ import { trapFocus } from '../../lib/focus-trap';
 import { Can } from '../../security/Can';
 import { Action } from '../../security/permissions';
 
+/**
+ * How a classification was reached, phrased so the number means what it says.
+ *
+ * Only the ML head produces a calibrated probability. A prototype match is a
+ * cosine similarity, which invariant #11 forbids storing in `confidence` — so
+ * that column is 0.0 for prototype hits, and rendering it as a percentage
+ * would claim the classifier was 0% sure when it in fact matched above its
+ * threshold. Prototype hits are distinguishable because they are the only
+ * `rules` decisions that carry a doc_type.
+ */
+const describeClassifier = (j: {
+  decided_by: string;
+  confidence: number | null;
+  doc_type: string | null;
+}): { label: string; hint: string } => {
+  if (j.decided_by === 'ml' && j.confidence != null) {
+    return {
+      label: `ML (${(j.confidence * 100).toFixed(1)}%)`,
+      hint: 'Calibrated model probability above the cascade threshold.',
+    };
+  }
+  if (j.decided_by === 'rules' && j.doc_type) {
+    return {
+      label: 'PROTOTYPE',
+      hint: 'Matched an admin-trained example set by embedding similarity. Similarity is not a calibrated probability, so no percentage is shown.',
+    };
+  }
+  if (j.decided_by === 'rules') {
+    return {
+      label: 'RULES',
+      hint: 'No model or prototype was confident enough; routed to human review.',
+    };
+  }
+  return { label: j.decided_by.toUpperCase(), hint: 'Decided by a human reviewer.' };
+};
+
 interface DocumentDrawerProps {
   documentId: string | null;
   onClose: () => void;
@@ -237,9 +273,12 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                     {justification?.decided_by && (
                       <div>
                         <span className="text-[#656d76] dark:text-[#848d97] block text-[11px]">Classifier Engine:</span>
-                        <span className="font-medium text-[#1f2328] dark:text-[#e6edf3] uppercase text-[10px]">
-                          {justification.decided_by}
-                          {justification.confidence != null ? ` (${(justification.confidence * 100).toFixed(1)}%)` : ''}
+                        <span
+                          data-testid="classifier-engine"
+                          className="font-medium text-[#1f2328] dark:text-[#e6edf3] uppercase text-[10px]"
+                          title={describeClassifier(justification).hint}
+                        >
+                          {describeClassifier(justification).label}
                         </span>
                       </div>
                     )}

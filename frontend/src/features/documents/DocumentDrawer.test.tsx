@@ -365,3 +365,72 @@ describe('DocumentDrawer — failure visibility', () => {
     expect(screen.queryByTestId('job-error')).not.toBeInTheDocument();
   });
 });
+
+describe('DocumentDrawer — classifier engine attribution', () => {
+  const previewFor = (decided_by: string, confidence: number, doc_type: string | null) => ({
+    id: DOC_ID,
+    filename: 'monthly_report_5.pdf',
+    mime: 'application/pdf',
+    char_count: 10,
+    pages: [],
+    full_text: '',
+    justification: {
+      level: 'Confidential',
+      level_rank: 3,
+      level_reason: 'Confidential: matched',
+      doc_type,
+      decided_by,
+      confidence,
+      confidence_threshold: 0.85,
+      keywords: [],
+      findings: [],
+    },
+  });
+
+  const mount = (decided_by: string, confidence: number, doc_type: string | null) => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === `/v1/documents/${DOC_ID}`)
+        return Promise.resolve(jsonResponse(makeDocument({ id: DOC_ID, level: 'Confidential', doc_type })));
+      if (url === `/v1/documents/${DOC_ID}/preview`)
+        return Promise.resolve(jsonResponse(previewFor(decided_by, confidence, doc_type)));
+      if (url === `/v1/documents/${DOC_ID}/jobs`) return Promise.resolve(jsonResponse([]));
+      if (url === `/v1/documents/${DOC_ID}/findings`) return Promise.resolve(jsonResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    renderWithProviders(<DocumentDrawer documentId={DOC_ID} onClose={() => {}} />);
+  };
+
+  it('never shows a 0.0% confidence for a prototype match', async () => {
+    // decided_by='rules' WITH a doc_type is a prototype hit. Its confidence is
+    // 0.0 by design (#11 forbids storing a cosine there), so rendering it as a
+    // percentage claims the opposite of what happened.
+    mount('rules', 0.0, 'Monthly Report');
+    const engine = await screen.findByTestId('classifier-engine');
+    expect(engine.textContent).not.toMatch(/0\.0%/);
+  });
+
+  it('labels a prototype match as such rather than as RULES', async () => {
+    mount('rules', 0.0, 'Monthly Report');
+    const engine = await screen.findByTestId('classifier-engine');
+    expect(engine.textContent).toMatch(/prototype/i);
+  });
+
+  it('shows plain RULES with no percentage when nothing decided a type', async () => {
+    mount('rules', 0.0, null);
+    const engine = await screen.findByTestId('classifier-engine');
+    expect(engine.textContent).toMatch(/rules/i);
+    expect(engine.textContent).not.toMatch(/%/);
+  });
+
+  it('still shows the calibrated percentage for an ML decision', async () => {
+    mount('ml', 0.9640539, 'Monthly Report');
+    const engine = await screen.findByTestId('classifier-engine');
+    expect(engine.textContent).toMatch(/96\.4%/);
+  });
+
+  it('shows no percentage for a human decision', async () => {
+    mount('human', 0.0, 'Monthly Report');
+    const engine = await screen.findByTestId('classifier-engine');
+    expect(engine.textContent).not.toMatch(/%/);
+  });
+});
