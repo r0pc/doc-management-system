@@ -195,7 +195,7 @@ export const DocumentsPage: React.FC = () => {
         />
       ) : (
         <div className="bg-white dark:bg-[#0d1117] rounded-md border border-[#d0d7de] dark:border-[#30363d] overflow-hidden shadow-2xs transition-colors">
-          <Table>
+          <Table data-testid="documents-table">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[35%]">
@@ -250,6 +250,9 @@ export const DocumentsPage: React.FC = () => {
               {documents.map((doc) => (
                 <TableRow
                   key={doc.id}
+                  data-testid="document-row"
+                  data-filename={doc.filename}
+                  data-status={doc.status}
                   className="cursor-pointer hover:bg-[#f6f8fa] dark:hover:bg-[#161b22]"
                   onClick={() => setSelectedDocId(doc.id)}
                 >

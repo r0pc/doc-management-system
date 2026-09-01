@@ -206,6 +206,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
       <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
         <div
           ref={panelRef}
+          data-testid="drawer"
           className="w-screen max-w-2xl bg-white dark:bg-[#161b22] border-l border-[#d0d7de] dark:border-[#30363d] shadow-2xl flex flex-col transition-colors"
         >
           {/* Header */}
