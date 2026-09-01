@@ -323,3 +323,70 @@ describe('UploadPage — form accessibility', () => {
     );
   });
 });
+
+describe('UploadPage — bulk upload', () => {
+  it('accepts multiple files and lists each with its own row', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />);
+    const input = screen.getByTestId('file-input') as HTMLInputElement;
+    await user.upload(input, [
+      new File(['a'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['b'], 'b.pdf', { type: 'application/pdf' }),
+    ]);
+    expect(await screen.findByText('a.pdf')).toBeInTheDocument();
+    expect(await screen.findByText('b.pdf')).toBeInTheDocument();
+  });
+
+  it('blocks a batch whose total exceeds 1 GiB before contacting the API', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />);
+    const files = Array.from({ length: 15 }, (_, i) => {
+      const f = new File(['x'], `doc${i}.pdf`, { type: 'application/pdf' });
+      Object.defineProperty(f, 'size', { value: 80 * 1024 * 1024 });
+      return f;
+    });
+
+    const input = screen.getByTestId('file-input') as HTMLInputElement;
+    await user.upload(input, files);
+    expect(await screen.findByText(/exceeds/i)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('one failing file does not abort the rest of the batch and reports a partial-success summary', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/v1/uploads/batch') {
+        return Promise.resolve(
+          jsonResponse({
+            batch_id: 'batch-1',
+            uploads: [
+              { upload_id: 'up-1', presigned_put: { url: 'https://storage/a', fields: {}, expires_at: 'x' } },
+              { upload_id: 'up-2', presigned_put: { url: 'https://storage/b', fields: {}, expires_at: 'x' } },
+            ],
+          })
+        );
+      }
+      if (url === '/v1/uploads/up-1/complete') {
+        return Promise.resolve(jsonResponse({ document_id: 'd-1', version_id: 'v-1', status: 'ready' }));
+      }
+      if (url === '/v1/uploads/up-2/complete') {
+        return Promise.reject(new Error('Complete failed'));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<UploadPage />);
+    const input = screen.getByTestId('file-input') as HTMLInputElement;
+    await user.upload(input, [
+      new File(['a'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['b'], 'b.pdf', { type: 'application/pdf' }),
+    ]);
+
+    await user.click(screen.getByRole('button', { name: /start batch upload/i }));
+
+    expect(await screen.findByTestId('file-status-a.pdf')).toHaveTextContent(/done/i);
+    expect(await screen.findByTestId('file-status-b.pdf')).toHaveTextContent(/failed/i);
+    expect(await screen.findByText(/1 of 2 uploaded/i)).toBeInTheDocument();
+  });
+});
+

@@ -13,6 +13,21 @@ export interface UploadIntentResponse {
   presigned_put: PresignedPut;
 }
 
+export interface BatchFileRequest {
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+}
+
+export interface BatchUploadRequest {
+  files: BatchFileRequest[];
+}
+
+export interface BatchUploadResponse {
+  batch_id: string;
+  uploads: UploadIntentResponse[];
+}
+
 export interface CompleteResponse {
   document_id: string;
   version_id: string;
