@@ -42,6 +42,8 @@ EXPECTED_TABLES = frozenset(
         "findings",
         "review_items",
         "access_log",
+        "doc_type_prototypes",
+        "detector_rules",
     }
 )
 
@@ -217,7 +219,7 @@ def test_every_index_compiles_to_postgresql_ddl() -> None:
             ddl = str(CreateIndex(idx).compile(dialect=postgresql.dialect()))
             assert "CREATE" in ddl
             index_count += 1
-    assert index_count == 11  # spec §6.2: eleven indexes, verbatim
+    assert index_count == 12  # spec §6.2: 11 core indexes + 1 prototype HNSW index
 
 
 @pytest.mark.anyio

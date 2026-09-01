@@ -30,6 +30,8 @@ EXPECTED_TABLES = frozenset(
         "findings",
         "review_items",
         "access_log",
+        "doc_type_prototypes",
+        "detector_rules",
     }
 )
 
@@ -46,12 +48,14 @@ EXPECTED_INDEXES = frozenset(
         "ix_document_text_tsv_gin",
         "ix_document_text_embedding_hnsw",
         "ix_document_keywords_keyword_score",
+        "idx_doc_type_prototypes_hnsw",
     }
 )
 
 # access_log joined this set in 0004: the audit trail is tenanted and must be
 # isolated like any other tenanted table (#26). Its rows carry a tenant_id that
 # 0005 backfills and pins NOT NULL, so no row can hide from the policy.
+# 0006 adds doc_types, doc_type_prototypes, and detector_rules.
 RLS_TABLES = frozenset(
     {
         "access_log",
@@ -65,6 +69,9 @@ RLS_TABLES = frozenset(
         "review_items",
         "classifications",
         "findings",
+        "doc_types",
+        "doc_type_prototypes",
+        "detector_rules",
     }
 )
 

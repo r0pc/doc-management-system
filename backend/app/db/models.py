@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -42,7 +43,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import UserDefinedType
 
@@ -171,6 +172,7 @@ class DocType(Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("doc_types.id"))
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text)
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tenants.id"), nullable=True)
 
 
 class ProcessingJob(Base):
@@ -279,6 +281,50 @@ class AccessLog(Base):
     ts: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DocTypePrototype(Base):
+    __tablename__ = "doc_type_prototypes"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "doc_type_id", name="uq_doc_type_prototypes_tenant_doctype"),
+        CheckConstraint("sample_count >= 5", name="chk_doc_type_prototypes_sample_count"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    doc_type_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("doc_types.id"))
+    centroid_vector: Mapped[list[float]] = mapped_column(Vector(384))
+    sample_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DetectorRule(Base):
+    __tablename__ = "detector_rules"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "entity_type", name="uq_detector_rules_tenant_entity"),
+        CheckConstraint("cardinality(context_words) > 0", name="chk_detector_rules_context_words"),
+        CheckConstraint("level_rank BETWEEN 1 AND 4", name="chk_detector_rules_level_rank"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"))
+    entity_type: Mapped[str] = mapped_column(Text)
+    pattern: Mapped[str] = mapped_column(Text)
+    validator_kind: Mapped[str] = mapped_column(Text)
+    validator_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    context_words: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    level_rank: Mapped[int] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 # --- spec §6.2 indexes, in spec order; names pinned for deterministic autogenerate ---
 Index(
     "ix_documents_tenant_status",
@@ -331,4 +377,10 @@ Index(
     "ix_document_keywords_keyword_score",
     DocumentKeyword.__table__.c.keyword_id,
     DocumentKeyword.__table__.c.score.desc(),
+)
+Index(
+    "idx_doc_type_prototypes_hnsw",
+    DocTypePrototype.__table__.c.centroid_vector,
+    postgresql_using="hnsw",
+    postgresql_ops={"centroid_vector": "vector_cosine_ops"},
 )
