@@ -39,6 +39,14 @@ COPY alembic ./alembic
 COPY app ./app
 COPY scripts ./scripts
 
+# COPY preserves the source mode, and a clone made on Windows has
+# core.fileMode=false — so a script committed as 644 arrives here non-executable
+# and compose's exec-form entrypoint dies with exit 126 ("found but not
+# executable") on Linux while working fine on a Windows host. The git modes are
+# the real fix; this is the belt to that braces, so the next script added from a
+# Windows clone cannot reintroduce a CI-only failure.
+RUN chmod +x ./scripts/*.sh
+
 # The TRAINED CLASSIFIER (model.joblib) is deliberately NOT copied in. It is
 # gitignored, it is not redistributable with the image, and AGENTS.md forbids
 # committing model weights; docker-compose mounts backend/var/models read-only
