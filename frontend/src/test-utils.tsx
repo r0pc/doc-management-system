@@ -63,7 +63,7 @@ export function makeDevToken(persona: DemoAccount): string {
 
 /**
  * Renders a component inside the providers it needs, with the dev-persona shim
- * DISABLED so `AuthProvider` never reaches for `/v1/dev/token`. The persona is
+ * DISABLED so `AuthProvider` never reaches for `/v1/auth/login`. The account is
  * injected directly, which keeps every test deterministic and keeps the auth
  * bootstrap out of tests that are not about auth.
  */
