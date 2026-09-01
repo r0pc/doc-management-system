@@ -37,6 +37,43 @@ under production defaults.
 
 ---
 
+## Signing in
+
+The app opens on `/login`. There is no anonymous access and no automatic
+session: every route redirects to the login page until you sign in, and the URL
+you asked for is restored afterwards.
+
+Five demo accounts are seeded by migration `0003`, one per role, covering all
+four security levels. They are listed on the login page itself — click one to
+sign in, or type the credentials.
+
+| Email | Password | Role | Clearance | Department |
+|---|---|---|---|---|
+| `admin@example.test` | `demo-admin` | admin | 4 · Restricted | HQ |
+| `officer@example.test` | `demo-officer` | security_officer | 4 · Restricted | HQ |
+| `manager@example.test` | `demo-manager` | dept_manager | 3 · Confidential | HR |
+| `employee@example.test` | `demo-employee` | employee | 2 · Internal | Engineering |
+| `viewer@example.test` | `demo-viewer` | viewer | 1 · Public | Engineering |
+
+Because access is two-axis, a lower-clearance account legitimately sees an
+**empty repository** rather than an error — clearance rank and department
+subtree are both applied server-side.
+
+**This is a dev shim, not an authentication system.** `POST /v1/auth/login` is
+mounted only when the API runs with `env=dev` and 404s otherwise; the
+credentials are constants in `backend/app/security/demo_accounts.py`, published
+by `GET /v1/auth/demo-accounts`; and `users` has no password column in any
+environment. Production authenticates through OIDC (see the ledger below), at
+which point this router is simply never mounted and the frontend's
+`DEMO_LOGIN_ENABLED` is a compile-time `false` that drops the whole surface from
+the bundle.
+
+The demo accounts are also the **single source of the seeded identities**: the
+token's `sub` is the seeded `oidc_sub`, so signing in binds to the seeded `users`
+row instead of provisioning a duplicate beside it.
+
+---
+
 ## Commands
 
 | Task | Command |
@@ -79,7 +116,7 @@ under production defaults.
 | **#4** | `processing_jobs` state journal around every stage; SQL-visible document status on failure | Exhaustive stage failure taxonomy; `app/workers/jobs.py:StageJournal` records before/after state transitions with timestamps; unhandled failure triggers `mark_document_failed`. |
 | **#5** | sha256 idempotency | Pipeline keyed on sha256; `_already_succeeded` checks state journal; `record_classification` SELECTs before INSERT. |
 | **#6** | Single extraction & embedding pass reused by classification and search | `derived/{sha}/text.json` written once by `extract_text`; the embed stage stores its vector in that same artifact and `classify` reuses it via `predict_type(embedding=...)` rather than re-encoding. |
-| **#7** | Identity validated against cached JWKS, no per-request IdP round-trips | `app/security/auth.py:OidcJwksVerifier` uses cached `PyJWKClient` with algorithm confusion defenses (`HS*` rejected in prod). |
+| **#7** | Identity validated against cached JWKS, no per-request IdP round-trips | `app/security/auth.py:OidcJwksVerifier` uses cached `PyJWKClient` with algorithm confusion defenses (`HS*` rejected in prod). Dev demo sign-in (`app/api/v1/auth.py`) mints a token for the same local `DevJWTVerifier` path and is mounted only under `env=dev`; it adds no verification path and never contacts an IdP. |
 | **#8** | `check_monotonic` trigger: automated cannot lower, human lowering audited | `alembic/versions/0005_monotonic_audit_backfill.py` is the current trigger: any `decided_by <> 'human'` write below the document's CURRENT classification rank is refused, at any version. Human overrides audited in `access_log` with justification in `access_log.detail`. |
 | **#9** | Nothing matched defaults to `Internal` floor, never `Public` | `app/domain/policy.py:aggregate_level` and SQL coalesce enforce `DEFAULT_FLOOR_RANK = 2` (`Internal`). |
 | **#10** | Recogniser is pattern + structural validator + context words (±50 chars) | `app/classification/rules/recognizers.py`, `app/classification/rules/base.py`, `app/classification/rules/validators.py`, and `app/classification/rules/configured.py`. Custom tenant rules enforce required structural validators and ReDoS safety at `POST /v1/admin/detectors`. |
@@ -105,7 +142,7 @@ under production defaults.
 | **#30** | Audit writes happen in same transaction as action | `app/api/deps.py:record_audit` executed and committed within the active `AsyncSession` across all mutation endpoints. |
 | **#31** | Cross-tenant 404 indistinguishable in body and timing; RFC 7807 problem JSON | `app/api/v1/errors.py:not_found()` returns uniform RFC 7807 response for nonexistent, foreign tenant, and denied rows. Unpromoted blobs return 409 to authorized callers, which preserves parity by not leaking existence across tenant boundaries. |
 | **#32** | Cursor pagination only; no `OFFSET` | Keyset pagination generalized in `app/db/pagination.py` to support arbitrary sort columns (`created_at`, `filename`, `status`, `level_rank`, `doc_type`) with keyset tie-breakers, nulls handling, and direction control without `OFFSET`. |
-| **#33** | Client-side permission checks are cosmetic; server-side enforcement | All endpoints enforce `deps.require(Action)` and server-side policy evaluation. |
+| **#33** | Client-side permission checks are cosmetic; server-side enforcement | All endpoints enforce `deps.require(Action)` and server-side policy evaluation. The `RequireAuth` route guard and the client-side token-expiry check are cosmetic in the same sense: they decide what is rendered, never what is served. |
 
 ---
 
@@ -122,3 +159,5 @@ under production defaults.
 9. **OCR Implementation Deferred**: True OCR processing is deferred; the pipeline currently marks documents requiring OCR as `held` instead of proceeding.
 10. **Inline Document View & Preview**: The API exposes `/v1/documents/{id}/view` and `/v1/documents/{id}/preview` endpoints for inline browser rendering and plain-text preview respectively, complementing the `/content` download endpoint.
 11. **Bulk Upload Batch Processing**: The API exposes `POST /v1/uploads/batch` returning atomic presigned upload intents per valid file, tracked under a single upload batch record.
+12. **Demo Sign-in is a Dev Shim, Not an Auth System**: `POST /v1/auth/login` verifies a plaintext credential against constants in `app/security/demo_accounts.py` and mints the existing HS256 dev JWT. It is mounted only when `env=dev` (and every handler re-checks, so a mis-wired mount 404s rather than authenticating), the credentials are published by `GET /v1/auth/demo-accounts` and printed on the login page, and `users` has no password column in any environment. AGENTS.md:197 targets Keycloak/OIDC for production, where this router is never mounted and the frontend gate is a compile-time `false`. Login is **not** audited to `access_log`: the row would need a tenanted RLS session and an actor FK for a surface that cannot exist in production, so attempts are logged to the application logger (role and email domain only) instead.
+13. **Demo Accounts Bind to the Seeded Users**: the login token's `sub` is the `oidc_sub` seeded by migration `0003`. This is load-bearing, not cosmetic — `provision_actor` upserts on `oidc_sub`, so a subject that does not match the seed does not fail, it silently provisions a *second* `users` row with a synthesised `…@oidc.local` email. The superseded persona shim did exactly that (`dev-admin_t1` vs `dev-admin`), leaving the five seeded users unused and accumulating duplicates. `tests/api/test_auth_login.py::TestSeedAlignment` parses the migration and asserts the two agree, because nothing at runtime surfaces the divergence.

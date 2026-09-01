@@ -2,15 +2,15 @@ import React from 'react';
 import { render, RenderOptions, RenderResult } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { AuthProvider, Persona, DEV_PERSONAS } from './api/auth';
+import { AuthProvider, DemoAccount, DEMO_ACCOUNTS } from './api/auth';
 import { setAuthToken } from './api/client';
 import { DocumentListItem } from './api/types';
 
-export const PERSONA_ADMIN = DEV_PERSONAS.find((p) => p.role === 'admin')!;
-export const PERSONA_SECURITY_OFFICER = DEV_PERSONAS.find((p) => p.role === 'security_officer')!;
-export const PERSONA_DEPT_MANAGER = DEV_PERSONAS.find((p) => p.role === 'dept_manager')!;
-export const PERSONA_EMPLOYEE = DEV_PERSONAS.find((p) => p.role === 'employee')!;
-export const PERSONA_VIEWER = DEV_PERSONAS.find((p) => p.role === 'viewer')!;
+export const PERSONA_ADMIN = DEMO_ACCOUNTS.find((p) => p.role === 'admin')!;
+export const PERSONA_SECURITY_OFFICER = DEMO_ACCOUNTS.find((p) => p.role === 'security_officer')!;
+export const PERSONA_DEPT_MANAGER = DEMO_ACCOUNTS.find((p) => p.role === 'dept_manager')!;
+export const PERSONA_EMPLOYEE = DEMO_ACCOUNTS.find((p) => p.role === 'employee')!;
+export const PERSONA_VIEWER = DEMO_ACCOUNTS.find((p) => p.role === 'viewer')!;
 
 /**
  * A QueryClient with retries off. The app's real client retries twice on
@@ -27,7 +27,7 @@ export function makeTestQueryClient(): QueryClient {
 }
 
 export interface RenderAppOptions extends Omit<RenderOptions, 'wrapper'> {
-  persona?: Persona | null;
+  persona?: DemoAccount | null;
   route?: string;
   queryClient?: QueryClient;
 }
@@ -43,7 +43,7 @@ export interface RenderAppOptions extends Omit<RenderOptions, 'wrapper'> {
  * The signature is deliberately junk: nothing client-side verifies it, and
  * nothing client-side ever should (invariant #33 — the API re-authorizes).
  */
-export function makeDevToken(persona: Persona): string {
+export function makeDevToken(persona: DemoAccount): string {
   const b64url = (value: object): string =>
     btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -76,11 +76,11 @@ export function renderWithProviders(
   // Seed a token matching the requested persona. Without this the provider
   // decodes whatever happens to be in storage, so `persona` would be silently
   // ignored whenever a test had already stored a token.
-  if (persona) setAuthToken(makeDevToken(persona));
+  setAuthToken(persona ? makeDevToken(persona) : null);
 
   const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <QueryClientProvider client={client}>
-      <AuthProvider devPersonasEnabled={false} initialPersona={persona}>
+      <AuthProvider demoLoginEnabled={false}>
         <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
       </AuthProvider>
     </QueryClientProvider>

@@ -5,11 +5,11 @@ import { ThemeToggle } from '../theme/ThemeToggle';
 import { Shield } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
-  // The dev-persona switcher mints admin sessions from a dropdown. It is only
-  // ever rendered when the backend's dev token endpoint can exist at all; in a
-  // production build `devPersonasEnabled` is a compile-time `false` and this
+  // The demo account switcher re-signs-in from published credentials. It is
+  // only ever rendered when the backend's demo login endpoint can exist at all;
+  // in a production build `demoLoginEnabled` is a compile-time `false` and this
   // whole subtree is dropped from the bundle.
-  const { devPersonasEnabled } = useAuth();
+  const { demoLoginEnabled } = useAuth();
 
   return (
     <header className="h-14 border-b border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#161b22] px-6 flex items-center justify-between sticky top-0 z-30 transition-colors">
@@ -26,7 +26,7 @@ export const Navbar: React.FC = () => {
 
       <div className="flex items-center gap-3">
         <ThemeToggle />
-        {devPersonasEnabled && <UserSwitcher />}
+        {demoLoginEnabled && <UserSwitcher />}
       </div>
     </header>
   );

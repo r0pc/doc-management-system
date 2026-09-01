@@ -16,6 +16,7 @@ from app.api import deps
 from app.api.v1 import (
     admin,
     audit,
+    auth,
     dev_auth,
     dev_storage,
     documents,
@@ -163,6 +164,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(dev_storage.router, prefix="/v1")
     if settings.env == "dev":
         app.include_router(dev_auth.router, prefix="/v1")
+        # Demo sign-in. Same gate as the persona shim, and for the same reason:
+        # it mints admin sessions from published credentials, which is exactly
+        # the affordance a production bundle must not carry. Its handlers
+        # re-check env, so a future mis-wired mount 404s instead of signing in.
+        app.include_router(auth.router, prefix="/v1")
     return app
 
 

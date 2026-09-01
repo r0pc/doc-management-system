@@ -1,22 +1,35 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { setAuthToken, getAuthToken } from './client';
 
+export type Role = 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
+
 export interface UserClaims {
   sub: string;
   tenant_id: string;
   department_id?: string;
   department_path?: string;
-  role: 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
+  role: Role;
   clearance_rank: number;
   email?: string;
   name?: string;
 }
 
-export interface Persona {
+/**
+ * One demo identity, mirroring `backend/app/security/demo_accounts.py` and the
+ * users seeded by migration 0003.
+ *
+ * `id` is the seeded `oidc_sub` suffix. It matters: the API upserts users on
+ * `oidc_sub`, so a subject that does not match the seed silently provisions a
+ * second row rather than signing in as the seeded user.
+ */
+export interface DemoAccount {
   id: string;
+  email: string;
+  password: string;
   label: string;
-  role: 'admin' | 'security_officer' | 'dept_manager' | 'employee' | 'viewer';
+  role: Role;
   clearance: number;
+  levelName: string;
   tenantId: string;
   tenantLabel: string;
   departmentId: string;
@@ -24,89 +37,107 @@ export interface Persona {
 }
 
 /**
- * Whether the hardcoded dev-persona shim is available at all.
+ * Whether demo sign-in is available at all.
  *
- * `POST /v1/dev/token` is mounted by the backend ONLY when `settings.env ==
- * "dev"` (backend/app/main.py) and raises otherwise, so the persona switcher is
- * dead weight in any other deployment — and shipping a UI that mints admin
- * sessions from a button is exactly the affordance you do not want in a
- * production bundle.
+ * `POST /v1/auth/login` is mounted by the backend ONLY when `settings.env ==
+ * "dev"` and 404s otherwise, so this whole surface is dead weight in any other
+ * deployment — and a login form that hands out admin sessions from published
+ * credentials is exactly the affordance you do not want in a production bundle.
  *
  * `import.meta.env.DEV` is statically replaced by Vite at build time, so in a
- * production build this is the literal `false` and every guarded branch
- * (including the persona list and the switcher) is dropped by dead-code
- * elimination. `VITE_DEV_PERSONAS=false` additionally turns it off in a dev
- * build — e.g. when pointing the dev server at a staging API. There is no value
- * of any environment variable that can turn it ON in a production build.
+ * production build this is the literal `false` and every guarded branch is
+ * dropped by dead-code elimination. `VITE_DEV_PERSONAS=false` additionally
+ * turns it off in a dev build — e.g. when pointing the dev server at a staging
+ * API. No environment variable can turn it ON in a production build.
  */
-export const DEV_PERSONAS_ENABLED: boolean =
+export const DEMO_LOGIN_ENABLED: boolean =
   import.meta.env.DEV && import.meta.env.VITE_DEV_PERSONAS !== 'false';
 
-export const DEV_PERSONAS: Persona[] = [
-  {
-    id: 'admin_t1',
-    label: 'Alice (Security Admin)',
-    role: 'admin',
-    clearance: 4,
-    tenantId: 'c0000000-0000-0000-0000-000000000001',
-    tenantLabel: 'Acme Corp (T1)',
-    departmentId: 'c0000000-0000-0000-0000-000000000011',
-    departmentLabel: 'HQ (Root)',
-  },
-  {
-    id: 'security_t1',
-    label: 'Bob (Security Officer)',
-    role: 'security_officer',
-    clearance: 3,
-    tenantId: 'c0000000-0000-0000-0000-000000000001',
-    tenantLabel: 'Acme Corp (T1)',
-    departmentId: 'c0000000-0000-0000-0000-000000000011',
-    departmentLabel: 'HQ (Root)',
-  },
-  {
-    id: 'employee_t1',
-    label: 'Charlie (Engineer)',
-    role: 'employee',
-    clearance: 2,
-    tenantId: 'c0000000-0000-0000-0000-000000000001',
-    tenantLabel: 'Acme Corp (T1)',
-    departmentId: 'c0000000-0000-0000-0000-000000000013',
-    departmentLabel: 'Engineering',
-  },
-  {
-    id: 'dept_manager_t1',
-    label: 'Dana (Dept Manager)',
-    role: 'dept_manager',
-    clearance: 2,
-    tenantId: 'c0000000-0000-0000-0000-000000000001',
-    tenantLabel: 'Acme Corp (T1)',
-    departmentId: 'c0000000-0000-0000-0000-000000000012',
-    departmentLabel: 'HR',
-  },
-  {
-    id: 'viewer_t1',
-    label: 'Eve (Viewer)',
-    role: 'viewer',
-    clearance: 1,
-    tenantId: 'c0000000-0000-0000-0000-000000000001',
-    tenantLabel: 'Acme Corp (T1)',
-    departmentId: 'c0000000-0000-0000-0000-000000000011',
-    departmentLabel: 'HQ',
-  },
-];
+const TENANT_ID = 'c0000000-0000-0000-0000-000000000001';
+const TENANT_LABEL = 'Demo Tenant';
+const HQ = 'c0000000-0000-0000-0000-000000000011';
+const HR = 'c0000000-0000-0000-0000-000000000012';
+const ENGINEERING = 'c0000000-0000-0000-0000-000000000013';
 
-function personaToClaims(persona: Persona): UserClaims {
-  return {
-    sub: `dev-${persona.id}`,
-    tenant_id: persona.tenantId,
-    department_id: persona.departmentId,
-    role: persona.role,
-    clearance_rank: persona.clearance,
-    name: persona.label,
-  };
-}
-
-
+/**
+ * The five demo accounts, one per role, covering all four security levels.
+ * Highest privilege first — the order the login page lists them in.
+ *
+ * Kept in step with the backend by `LoginPage` itself: it fetches
+ * `/v1/auth/demo-accounts` and prefers the server's list, falling back to this
+ * one only when the endpoint is unreachable. The e2e suite asserts the two
+ * agree, so a drift fails a test rather than showing a password that does not
+ * work.
+ */
+export const DEMO_ACCOUNTS: DemoAccount[] = DEMO_LOGIN_ENABLED
+  ? [
+      {
+        id: 'admin',
+        email: 'admin@example.test',
+        password: 'demo-admin',
+        label: 'Alice Ahmed',
+        role: 'admin',
+        clearance: 4,
+        levelName: 'restricted',
+        tenantId: TENANT_ID,
+        tenantLabel: TENANT_LABEL,
+        departmentId: HQ,
+        departmentLabel: 'HQ',
+      },
+      {
+        id: 'officer',
+        email: 'officer@example.test',
+        password: 'demo-officer',
+        label: 'Bilal Officer',
+        role: 'security_officer',
+        clearance: 4,
+        levelName: 'restricted',
+        tenantId: TENANT_ID,
+        tenantLabel: TENANT_LABEL,
+        departmentId: HQ,
+        departmentLabel: 'HQ',
+      },
+      {
+        id: 'manager',
+        email: 'manager@example.test',
+        password: 'demo-manager',
+        label: 'Dania Manager',
+        role: 'dept_manager',
+        clearance: 3,
+        levelName: 'confidential',
+        tenantId: TENANT_ID,
+        tenantLabel: TENANT_LABEL,
+        departmentId: HR,
+        departmentLabel: 'HR',
+      },
+      {
+        id: 'employee',
+        email: 'employee@example.test',
+        password: 'demo-employee',
+        label: 'Chaudhry Employee',
+        role: 'employee',
+        clearance: 2,
+        levelName: 'internal',
+        tenantId: TENANT_ID,
+        tenantLabel: TENANT_LABEL,
+        departmentId: ENGINEERING,
+        departmentLabel: 'Engineering',
+      },
+      {
+        id: 'viewer',
+        email: 'viewer@example.test',
+        password: 'demo-viewer',
+        label: 'Erum Viewer',
+        role: 'viewer',
+        clearance: 1,
+        levelName: 'public',
+        tenantId: TENANT_ID,
+        tenantLabel: TENANT_LABEL,
+        departmentId: ENGINEERING,
+        departmentLabel: 'Engineering',
+      },
+    ]
+  : [];
 
 /**
  * Decodes the JWT payload for DISPLAY ONLY. The signature is not checked here
@@ -114,7 +145,7 @@ function personaToClaims(persona: Persona): UserClaims {
  * (invariant #33). Authorization is decided by the API against the verified
  * token; a user who edits this payload changes the menu, not their access.
  */
-function parseJwt(token: string): UserClaims | null {
+function parseJwt(token: string): (UserClaims & { exp?: number }) | null {
   try {
     const base64Url = token.split('.')[1];
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
@@ -135,34 +166,62 @@ function parseJwt(token: string): UserClaims | null {
       clearance_rank: parsed.clearance_rank ?? parsed.clearance ?? 1,
       email: parsed.email,
       name: parsed.name,
+      exp: typeof parsed.exp === 'number' ? parsed.exp : undefined,
     };
   } catch {
     return null;
   }
 }
 
-async function createDevJwt(persona: Persona): Promise<string> {
-  const response = await fetch('/v1/dev/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(persona),
-  });
+/**
+ * Claims from a stored token, or null if it is missing, malformed, or expired.
+ *
+ * The expiry check is cosmetic like every other client-side check (#33) — the
+ * API rejects an expired token whatever this returns. Its job is to send the
+ * user to the login page instead of drawing a full application shell over a
+ * session that will 401 on its first request.
+ */
+function claimsFromStoredToken(token: string | null): UserClaims | null {
+  if (!token) return null;
+  const claims = parseJwt(token);
+  if (!claims) return null;
+  if (claims.exp !== undefined && claims.exp * 1000 <= Date.now()) return null;
+  return claims;
+}
 
-  if (!response.ok) {
-    // 404 is the expected shape when the API runs with env != dev: the router
-    // is not mounted at all. Treat it the same as any other failure — no token.
-    throw new Error(
-      response.status === 404
-        ? 'The dev token endpoint is not available on this API (it exists only when the backend runs with env=dev).'
-        : `Failed to mint dev token from backend (HTTP ${response.status}).`
-    );
+/** The message shown for any failed sign-in; the API does not say which half was wrong. */
+export const SIGN_IN_FAILED = 'Invalid email or password.';
+
+interface LoginResponse {
+  access_token?: string;
+  user?: { name?: string; email?: string };
+}
+
+async function requestToken(email: string, password: string): Promise<string> {
+  let response: Response;
+  try {
+    response = await fetch('/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new Error('Could not reach the API. Is the backend running?');
   }
 
-  const data = await response.json();
+  if (response.status === 401) throw new Error(SIGN_IN_FAILED);
+  if (response.status === 404) {
+    // The router is not mounted, which is the expected shape when the API runs
+    // with env != dev. Say so rather than reporting bad credentials.
+    throw new Error(
+      'Demo sign-in is not available on this API (it exists only when the backend runs with env=dev).'
+    );
+  }
+  if (!response.ok) throw new Error(`Sign-in failed (HTTP ${response.status}).`);
+
+  const data: LoginResponse = await response.json();
   if (!data || typeof data.access_token !== 'string' || data.access_token === '') {
-    throw new Error('Dev token endpoint returned no access_token.');
+    throw new Error('The sign-in endpoint returned no access token.');
   }
   return data.access_token;
 }
@@ -170,127 +229,85 @@ async function createDevJwt(persona: Persona): Promise<string> {
 interface AuthContextType {
   token: string | null;
   user: UserClaims | null;
-  currentPersona: Persona | null;
-  /** True once the initial token acquisition has settled (either way). */
+  /** The demo account matching the session, when one does. Display only. */
+  currentAccount: DemoAccount | null;
+  /** True once the stored session has been inspected. */
   authReady: boolean;
-  /** Non-null when the session could not be established. */
-  authError: string | null;
-  /** True when the dev-persona switcher may be rendered at all. */
-  devPersonasEnabled: boolean;
-  loginWithPersona: (persona: Persona) => Promise<void>;
+  /** True when the demo sign-in surface may be rendered at all. */
+  demoLoginEnabled: boolean;
+  /** Resolves on success; rejects with a displayable message otherwise. */
+  signIn: (email: string, password: string) => Promise<void>;
   setCustomToken: (token: string) => void;
-  logout: () => void;
+  signOut: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function matchAccount(claims: UserClaims | null): DemoAccount | null {
+  if (!claims) return null;
+  return DEMO_ACCOUNTS.find((a) => `dev-${a.id}` === claims.sub) ?? null;
+}
+
 export interface AuthProviderProps {
   children: React.ReactNode;
   /**
-   * Overrides {@link DEV_PERSONAS_ENABLED}. Tests set this to keep the provider
+   * Overrides {@link DEMO_LOGIN_ENABLED}. Tests set this to keep the provider
    * off the network; production code never passes it.
    */
-  devPersonasEnabled?: boolean;
-  /**
-   * Persona to seed the session with when there is no stored token. Defaults to
-   * the first dev persona while the shim is enabled, and to `null` otherwise —
-   * a production build starts with NO user rather than a fabricated admin.
-   */
-  initialPersona?: Persona | null;
+  demoLoginEnabled?: boolean;
 }
 
+/**
+ * Holds the session. It never establishes one on its own.
+ *
+ * This provider used to sign the visitor in as `DEV_PERSONAS[0]` — a
+ * clearance-4 Security Admin — on mount, so opening the app in a browser was
+ * itself a full-privilege grant with no action taken. Sessions now come from
+ * the login page and nowhere else; with no stored token the app renders
+ * `/login`, not an admin shell.
+ */
 export const AuthProvider: React.FC<AuthProviderProps> = ({
   children,
-  devPersonasEnabled = DEV_PERSONAS_ENABLED,
-  initialPersona,
+  demoLoginEnabled = DEMO_LOGIN_ENABLED,
 }) => {
-  const seedPersona =
-    initialPersona !== undefined ? initialPersona : devPersonasEnabled ? DEV_PERSONAS[0] : null;
-
-  const [token, setToken] = useState<string | null>(() => getAuthToken());
-  const [user, setUser] = useState<UserClaims | null>(() => {
+  const [token, setToken] = useState<string | null>(() => {
     const stored = getAuthToken();
-    if (stored) return parseJwt(stored);
-    return seedPersona ? personaToClaims(seedPersona) : null;
+    return claimsFromStoredToken(stored) ? stored : null;
   });
-  const [currentPersona, setCurrentPersona] = useState<Persona | null>(() => {
-    const stored = getAuthToken();
-    if (!stored) return seedPersona;
-    const claims = parseJwt(stored);
-    if (!claims) return seedPersona;
-    return (
-      DEV_PERSONAS.find((p) => p.role === claims.role && p.tenantId === claims.tenant_id) ??
-      seedPersona
-    );
-  });
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authReady, setAuthReady] = useState<boolean>(() => !!getAuthToken());
-
-  const loginWithPersona = async (persona: Persona) => {
-    if (!devPersonasEnabled) {
-      // Defence in depth: even if a caller reaches this, no dev token is minted
-      // outside a dev build.
-      setAuthError('Dev persona login is disabled in this build.');
-      setAuthReady(true);
-      return;
-    }
-    try {
-      const devToken = await createDevJwt(persona);
-      setAuthToken(devToken);
-      setToken(devToken);
-      setUser(personaToClaims(persona));
-      setCurrentPersona(persona);
-      setAuthError(null);
-    } catch (e) {
-      // FAIL CLOSED. Previously this only logged, leaving `user` populated from
-      // the persona while `token` stayed null — the UI rendered a full admin
-      // shell for a session that had no credentials at all, and every request
-      // went out unauthenticated. Drop the identity so the UI reflects reality.
-      setAuthToken(null);
-      setToken(null);
-      setUser(null);
-      setCurrentPersona(null);
-      setAuthError(e instanceof Error ? e.message : 'Failed to establish a session.');
-    } finally {
-      setAuthReady(true);
-    }
-  };
+  const [user, setUser] = useState<UserClaims | null>(() => claimsFromStoredToken(getAuthToken()));
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    if (getAuthToken()) {
-      setAuthReady(true);
-      return;
-    }
-    if (!devPersonasEnabled || !seedPersona) {
-      // No stored token and no dev shim: there is nothing this build can do to
-      // authenticate. Surface it instead of pretending someone is signed in.
-      setUser(null);
-      setCurrentPersona(null);
-      setAuthReady(true);
-      setAuthError(
-        devPersonasEnabled ? null : 'Not signed in. This build has no dev persona shim.'
-      );
-      return;
-    }
-    // Runs once on mount; the persona shim has no reactive inputs.
-    void loginWithPersona(seedPersona);
+    // An expired or malformed token is worse than none: it makes the app look
+    // signed in while every request 401s. Drop it on the way past.
+    const stored = getAuthToken();
+    if (stored && !claimsFromStoredToken(stored)) setAuthToken(null);
+    setAuthReady(true);
   }, []);
+
+  const signIn = async (email: string, password: string) => {
+    if (!demoLoginEnabled) {
+      // Defence in depth behind the build-time gate: no token is minted here
+      // outside a dev build even if a caller reaches this.
+      throw new Error('Demo sign-in is disabled in this build.');
+    }
+    const issued = await requestToken(email, password);
+    setAuthToken(issued);
+    setToken(issued);
+    setUser(parseJwt(issued));
+  };
 
   const setCustomToken = (newToken: string) => {
     setAuthToken(newToken);
     setToken(newToken);
     setUser(parseJwt(newToken));
-    setCurrentPersona(null);
-    setAuthError(null);
     setAuthReady(true);
   };
 
-  const logout = () => {
+  const signOut = () => {
     setAuthToken(null);
     setToken(null);
     setUser(null);
-    setCurrentPersona(null);
-    setAuthReady(true);
   };
 
   return (
@@ -298,13 +315,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       value={{
         token,
         user,
-        currentPersona,
+        currentAccount: matchAccount(user),
         authReady,
-        authError,
-        devPersonasEnabled,
-        loginWithPersona,
+        demoLoginEnabled,
+        signIn,
         setCustomToken,
-        logout,
+        signOut,
       }}
     >
       {children}
