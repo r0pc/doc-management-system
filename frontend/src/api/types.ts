@@ -197,3 +197,53 @@ export interface CursorPaginated<T> {
   items: T[];
   next_cursor: string | null;
 }
+
+export interface TrainPrototypeRequest {
+  document_ids: string[];
+}
+
+export interface TrainPrototypeResponse {
+  doc_type_id: string;
+  sample_count: number;
+  dimension: number;
+}
+
+export interface DetectorRuleOut {
+  id: string;
+  entity_type: string;
+  pattern: string;
+  validator_kind: string;
+  validator_config: Record<string, any>;
+  context_words: string[];
+  level_rank: number;
+  enabled: boolean;
+}
+
+export interface DetectorRuleCreate {
+  entity_type: string;
+  pattern: string;
+  validator_kind: string;
+  validator_config: Record<string, any>;
+  context_words: string[];
+  level_rank: number;
+  enabled?: boolean;
+}
+
+export interface DetectorRuleUpdate {
+  pattern?: string;
+  validator_kind?: string;
+  validator_config?: Record<string, any>;
+  context_words?: string[];
+  level_rank?: number;
+  enabled?: boolean;
+}
+
+export interface DetectorMatchOut {
+  char_start: number;
+  char_end: number;
+  score: number;
+}
+
+export interface DetectorPreviewResponse {
+  matches: DetectorMatchOut[];
+}
