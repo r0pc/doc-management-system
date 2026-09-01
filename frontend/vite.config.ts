@@ -11,6 +11,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/v1': {
@@ -27,5 +28,6 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
+    exclude: ['**/node_modules/**', '**/e2e/**', '**/dist/**'],
   },
 } as any);

@@ -225,3 +225,5 @@ frontend/dist/
 
 ml/corpus/
 dataset.csv
+frontend/test-results/
+frontend/playwright-report/
