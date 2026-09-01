@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import (
     HTTP_409_CONFLICT,
     HTTP_413_CONTENT_TOO_LARGE,
+    HTTP_422_UNPROCESSABLE_CONTENT,
     HTTP_503_SERVICE_UNAVAILABLE,
 )
 
@@ -79,6 +80,21 @@ class PresignedPut(BaseModel):
 class UploadIntentResponse(BaseModel):
     upload_id: uuid.UUID
     presigned_put: PresignedPut
+
+
+class BatchFileRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=512)
+    size_bytes: int = Field(ge=1)
+    content_type: str = Field(min_length=1)
+
+
+class BatchUploadRequest(BaseModel):
+    files: list[BatchFileRequest] = Field(min_length=1)
+
+
+class BatchUploadResponse(BaseModel):
+    batch_id: uuid.UUID
+    uploads: list[UploadIntentResponse]
 
 
 class CompleteResponse(BaseModel):
@@ -234,6 +250,81 @@ async def create_upload_intent(
             fields=fields,
             expires_at=datetime.now(tz=UTC) + timedelta(seconds=ttl),
         ),
+    )
+
+
+@router.post("/batch", status_code=201, response_model=BatchUploadResponse)
+async def create_batch_upload_intent(
+    request: Request,
+    payload: BatchUploadRequest,
+    user: UserCtx = Depends(deps.require(Action.UPLOAD)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+    settings: Settings = Depends(deps.get_settings),
+    storage: Storage = Depends(deps.get_storage),
+) -> BatchUploadResponse:
+    """Sign one upload per file. Caps are checked BEFORE any row is written.
+
+    All-or-nothing at intent time: a batch that breaches a cap creates no
+    document rows at all, so a rejected batch leaves nothing to reconcile.
+    """
+    if len(payload.files) > settings.upload_batch_max_files:
+        raise HTTPException(
+            HTTP_422_UNPROCESSABLE_CONTENT,
+            f"batch exceeds {settings.upload_batch_max_files} files",
+        )
+    for f in payload.files:
+        if f.size_bytes > settings.upload_max_bytes:
+            raise HTTPException(HTTP_413_CONTENT_TOO_LARGE, "a file exceeds the per-file cap")
+    if sum(f.size_bytes for f in payload.files) > settings.upload_batch_max_bytes:
+        raise HTTPException(HTTP_413_CONTENT_TOO_LARGE, "batch exceeds the total size cap")
+
+    batch_id = uuid.uuid4()
+    ttl = settings.upload_presign_ttl_seconds
+    now = datetime.now(tz=UTC)
+    expires_at = now + timedelta(seconds=ttl)
+    uploads: list[UploadIntentResponse] = []
+
+    async with sessions(user.tenant_id) as session:
+        actor_id = await _provision_actor(session, user)
+        for f in payload.files:
+            document_id = uuid.uuid4()
+            key = quarantine_key(user.tenant_id, document_id)
+            await _insert_quarantine_document(
+                session,
+                document_id=document_id,
+                user=user,
+                filename=f.filename,
+                actor_id=actor_id,
+            )
+            upload = storage.presign_put(
+                key,
+                ttl,
+                content_type=f.content_type,
+                max_bytes=settings.upload_max_bytes,
+            )
+            await deps.record_audit(
+                session,
+                tenant_id=user.tenant_id,
+                document_id=document_id,
+                actor_id=actor_id,
+                action="upload.init",
+                request=request,
+            )
+            uploads.append(
+                UploadIntentResponse(
+                    upload_id=document_id,
+                    presigned_put=PresignedPut(
+                        url=upload.url,
+                        fields=upload.fields,
+                        expires_at=expires_at,
+                    ),
+                )
+            )
+        await session.commit()
+
+    return BatchUploadResponse(
+        batch_id=batch_id,
+        uploads=uploads,
     )
 
 

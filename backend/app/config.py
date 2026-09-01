@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     oidc_audience: str | None = None
 
     upload_max_bytes: int = 104857600
+    upload_batch_max_bytes: int = 1073741824  # 1 GiB total per batch
+    upload_batch_max_files: int = 500
     presign_ttl_seconds: int = 90
     upload_presign_ttl_seconds: int = 900
 
