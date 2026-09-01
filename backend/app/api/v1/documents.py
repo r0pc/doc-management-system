@@ -36,7 +36,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, BinaryIO, Literal, cast
+from typing import Any, BinaryIO, Final, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
@@ -109,6 +109,7 @@ class DocumentListItem(BaseModel):
     doc_type: str | None
     created_at: datetime
     duplicate_of: list[uuid.UUID] = []
+    level_rank: int | None = None
 
 
 class DocumentPage(BaseModel):
@@ -251,21 +252,81 @@ def _build_level_reason(level_name: str | None, findings: list[FindingOut]) -> s
     )
 
 
-# --- cursor codec (opaque, keyset on (created_at, id)) ---
+SortField = Literal["created_at", "filename", "status", "level", "doc_type"]
+SortDirection = Literal["asc", "desc"]
+
+SORT_FIELDS: Final[tuple[str, ...]] = (
+    "created_at",
+    "filename",
+    "status",
+    "level",
+    "doc_type",
+)
 
 
-def encode_cursor(created_at: datetime, document_id: uuid.UUID) -> str:
-    raw = f"{created_at.isoformat()}|{document_id}"
-    return base64.urlsafe_b64encode(raw.encode()).decode()
+@dataclass(frozen=True)
+class SortCursor:
+    """A keyset position: which sort produced it, and where it stopped.
+
+    The sort travels INSIDE the token so a page cannot be interpreted under a
+    different sort than the one that produced it — that would silently skip or
+    repeat rows across a page boundary (#32).
+    """
+
+    field: str
+    direction: str
+    value: datetime | str | int | None
+    document_id: uuid.UUID
 
 
-def decode_cursor(token: str) -> tuple[datetime, uuid.UUID]:
-    # Broad except is deliberate: b64/isodatetime/uuid failures all mean the
+def encode_cursor(
+    sort_field: str,
+    direction: str,
+    sort_value: datetime | str | int | None,
+    document_id: uuid.UUID,
+) -> str:
+    kind: str
+    val: Any
+    if isinstance(sort_value, datetime):
+        kind = "dt"
+        val = sort_value.isoformat()
+    elif isinstance(sort_value, int):
+        kind = "i"
+        val = sort_value
+    elif sort_value is None:
+        kind = "null"
+        val = None
+    else:
+        kind = "s"
+        val = str(sort_value)
+    payload = {
+        "f": sort_field,
+        "d": direction,
+        "v": val,
+        "t": kind,
+        "i": str(document_id),
+    }
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
+def decode_cursor(token: str) -> SortCursor:
+    # Broad except is deliberate: b64/json/isoformat/uuid failures all mean the
     # same thing — an unusable cursor — and none may leak decoder internals.
     try:
-        raw = base64.urlsafe_b64decode(token.encode()).decode()
-        ts_text, id_text = raw.split("|", 1)
-        return datetime.fromisoformat(ts_text), uuid.UUID(id_text)
+        raw = json.loads(base64.urlsafe_b64decode(token.encode()).decode())
+        field, direction, kind = raw["f"], raw["d"], raw["t"]
+        if field not in SORT_FIELDS or direction not in ("asc", "desc"):
+            raise ValueError("unknown sort")
+        value: datetime | str | int | None
+        if kind == "dt":
+            value = datetime.fromisoformat(raw["v"])
+        elif kind == "i":
+            value = int(raw["v"])
+        elif kind == "null":
+            value = None
+        else:
+            value = str(raw["v"])
+        return SortCursor(field, direction, value, uuid.UUID(raw["i"]))
     except Exception as exc:
         raise HTTPException(HTTP_400_BAD_REQUEST, "invalid cursor") from exc
 
@@ -309,16 +370,70 @@ def parse_range(header_value: str | None, total: int) -> tuple[int, int] | None:
 # --- data-access seams (monkeypatched in unit tests; SQL proven Wave 5) ---
 
 
+def _sort_expression(sort_field: str) -> Any:
+    """The ORDER BY / keyset expression for a sort column.
+
+    Nullable columns are coalesced to an explicit sentinel so unclassified rows
+    sort predictably and — critically — so the keyset comparison is never NULL.
+    `(NULL, id) > (value, id)` evaluates to NULL, not false, which silently
+    DROPS those rows at a page boundary instead of ordering them (#32).
+
+    level coalesces to DEFAULT_FLOOR_RANK because that is the rank an
+    unclassified document is actually authorised at (#9) — sorting it anywhere
+    else would disagree with how it is treated.
+    """
+    if sort_field == "created_at":
+        return Document.created_at
+    if sort_field == "filename":
+        return Document.original_filename
+    if sort_field == "status":
+        return Document.status
+    if sort_field == "level":
+        return func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK)
+    if sort_field == "doc_type":
+        return func.coalesce(DocType.name, "")
+    msg = f"unsortable field: {sort_field}"
+    raise ValueError(msg)
+
+
+def _null_sentinel(sort_field: str) -> Any:
+    """The value a NULL sort key was coalesced to, for cursor comparison."""
+    return DEFAULT_FLOOR_RANK if sort_field == "level" else ""
+
+
+def _sort_value_of(item: DocumentListItem, sort_field: str) -> datetime | str | int | None:
+    if sort_field == "created_at":
+        return item.created_at
+    if sort_field == "filename":
+        return item.filename
+    if sort_field == "status":
+        return item.status
+    if sort_field == "level":
+        return item.level_rank if item.level_rank is not None else DEFAULT_FLOOR_RANK
+    if sort_field == "doc_type":
+        return item.doc_type
+    msg = f"unknown sort field: {sort_field}"
+    raise ValueError(msg)
+
+
 async def _fetch_document_page(
     session: AsyncSession,
     user: UserCtx,
-    after: tuple[datetime, uuid.UUID] | None,
+    after: SortCursor | None,
     limit_plus_one: int,
     *,
     status: str | None = None,
     level: str | None = None,
+    sort_field: str = "created_at",
+    direction: str = "asc",
 ) -> list[DocumentListItem]:
     """Keyset page filtered by BOTH access axes inside the query (#25/#27)."""
+    sort_col = _sort_expression(sort_field)
+    ascending = direction == "asc"
+    order = (
+        (sort_col.asc(), Document.id.asc()) if ascending else (sort_col.desc(), Document.id.desc())
+    )
+
     stmt = (
         select(
             Document.id,
@@ -327,6 +442,7 @@ async def _fetch_document_page(
             SecurityLevel.name.label("level_name"),
             DocType.name.label("doc_type_name"),
             Document.created_at,
+            SecurityLevel.rank.label("level_rank"),
         )
         .join(
             Classification,
@@ -340,7 +456,6 @@ async def _fetch_document_page(
             Document.deleted_at.is_(None),
             func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK) <= user.clearance_rank,
         )
-        .order_by(Document.created_at.asc(), Document.id.asc())
     )
     if status is not None:
         stmt = stmt.where(Document.status == status)
@@ -356,9 +471,15 @@ async def _fetch_document_page(
     else:
         stmt = stmt.where(Document.department_id.is_(None))
     if after is not None:
-        stmt = stmt.where(tuple_(Document.created_at, Document.id) > after)
+        anchor = after.value if after.value is not None else _null_sentinel(sort_field)
+        keyset = tuple_(sort_col, Document.id)
+        stmt = stmt.where(
+            keyset > (anchor, after.document_id)
+            if ascending
+            else keyset < (anchor, after.document_id)
+        )
 
-    stmt = stmt.limit(limit_plus_one)
+    stmt = stmt.order_by(*order).limit(limit_plus_one)
     rows = (await session.execute(stmt)).all()
     return [
         DocumentListItem(
@@ -368,6 +489,7 @@ async def _fetch_document_page(
             level=row.level_name,
             doc_type=row.doc_type_name,
             created_at=row.created_at,
+            level_rank=row.level_rank,
         )
         for row in rows
     ]
@@ -603,16 +725,40 @@ async def list_documents(
     cursor: str | None = Query(default=None),
     status: Literal[DOCUMENT_STATUSES] | None = Query(default=None),  # type: ignore[valid-type]
     security_level: LevelName | None = Query(default=None),
+    sort: Literal["created_at", "filename", "status", "level", "doc_type"] | None = Query(
+        default=None
+    ),
+    direction: Literal["asc", "desc"] = Query(default="asc"),
 ) -> DocumentPage:
     """Keyset pagination over documents. Cursor is an opaque token."""
     after = decode_cursor(cursor) if cursor is not None else None
+    sort_field = sort or (after.field if after else "created_at")
+    sort_dir = after.direction if after else direction
+    if (
+        after is not None
+        and sort is not None
+        and (sort != after.field or direction != after.direction)
+    ):
+        raise HTTPException(HTTP_400_BAD_REQUEST, "invalid cursor")
+
     async with sessions(user.tenant_id) as session:
         rows = await _fetch_document_page(
-            session, user, after, limit + 1, status=status, level=security_level
+            session,
+            user,
+            after,
+            limit + 1,
+            status=status,
+            level=security_level,
+            sort_field=sort_field,
+            direction=sort_dir,
         )
     has_more = len(rows) > limit
     page = rows[:limit]
-    next_cursor = encode_cursor(page[-1].created_at, page[-1].id) if has_more and page else None
+    next_cursor = (
+        encode_cursor(sort_field, sort_dir, _sort_value_of(page[-1], sort_field), page[-1].id)
+        if has_more and page
+        else None
+    )
     return DocumentPage(items=page, next_cursor=next_cursor)
 
 

@@ -28,6 +28,7 @@ export interface DocumentListItem {
   doc_type: string | null;
   created_at: string;
   duplicate_of?: string[];
+  level_rank?: number | null;
 }
 
 export interface DocumentPage {

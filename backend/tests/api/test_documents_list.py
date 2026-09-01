@@ -36,7 +36,7 @@ def install_page_fake(
     async def page(
         session: Any,
         user: Any,
-        after: tuple[datetime, UUID] | None,
+        after: Any,
         limit_plus_one: int,
         **kwargs: Any,
     ) -> list[DocumentListItem]:
@@ -44,7 +44,9 @@ def install_page_fake(
         captured["limit_plus_one"] = limit_plus_one
         ordered = sorted(rows, key=lambda d: (d.created_at, d.id))
         if after is not None:
-            ordered = [d for d in ordered if (d.created_at, d.id) > after]
+            ordered = [
+                d for d in ordered if (d.created_at, d.id) > (after.value, after.document_id)
+            ]
         return ordered[:limit_plus_one]
 
     monkeypatch.setattr("app.api.v1.documents._fetch_document_page", page)
@@ -79,7 +81,10 @@ def test_cursor_roundtrip_feeds_decoded_keyset(
     assert [entry["id"] for entry in body["items"]] == [str(UUID(int=2))]
     assert body["next_cursor"] is None
     anchor = rows[1]
-    assert captured["after"] == (anchor.created_at, anchor.id)
+    assert captured["after"].value == anchor.created_at
+    assert captured["after"].document_id == anchor.id
+    assert captured["after"].field == "created_at"
+    assert captured["after"].direction == "asc"
 
 
 def test_garbage_cursor_is_400_problem(client: Any) -> None:

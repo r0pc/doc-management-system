@@ -11,7 +11,7 @@ import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { DocumentDrawer } from './DocumentDrawer';
 import { ReclassifyModal } from './ReclassifyModal';
 import { formatDate } from '../../lib/utils';
-import { FileText, Eye, Filter, RefreshCw, Plus } from 'lucide-react';
+import { FileText, Eye, Filter, RefreshCw, Plus, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
@@ -20,6 +20,8 @@ export const DocumentsPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const statusFilter = searchParams.get('status') || '';
   const levelFilter = searchParams.get('level') || '';
+  const currentSort = searchParams.get('sort') || 'created_at';
+  const currentDirection = (searchParams.get('direction') as 'asc' | 'desc') || 'asc';
   
   const [cursors, setCursors] = useState<string[]>([]);
   const currentCursor = cursors[cursors.length - 1] ?? undefined;
@@ -40,6 +42,30 @@ export const DocumentsPage: React.FC = () => {
     setCursors([]);
   };
 
+  const handleSort = (field: string) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (currentSort === field) {
+      const nextDir = currentDirection === 'asc' ? 'desc' : 'asc';
+      newParams.set('direction', nextDir);
+    } else {
+      newParams.set('sort', field);
+      newParams.set('direction', 'asc');
+    }
+    setSearchParams(newParams);
+    setCursors([]);
+  };
+
+  const renderSortIndicator = (field: string) => {
+    if (currentSort !== field) {
+      return <ArrowUpDown className="w-3 h-3 text-[#656d76]/50 dark:text-[#848d97]/50 ml-1 inline-block" />;
+    }
+    return currentDirection === 'asc' ? (
+      <ArrowUp className="w-3 h-3 text-[#0969da] dark:text-[#2f81f7] ml-1 inline-block" />
+    ) : (
+      <ArrowDown className="w-3 h-3 text-[#0969da] dark:text-[#2f81f7] ml-1 inline-block" />
+    );
+  };
+
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [reclassifyingDoc, setReclassifyingDoc] = useState<DocumentListItem | null>(null);
 
@@ -50,11 +76,13 @@ export const DocumentsPage: React.FC = () => {
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ['documents', statusFilter, levelFilter, currentCursor],
+    queryKey: ['documents', statusFilter, levelFilter, currentSort, currentDirection, currentCursor],
     queryFn: () =>
       api.get<any>('/v1/documents', {
         status: statusFilter || undefined,
         security_level: levelFilter || undefined,
+        sort: searchParams.get('sort') || undefined,
+        direction: searchParams.get('direction') || undefined,
         limit: 50,
         cursor: currentCursor,
       }),
@@ -170,11 +198,51 @@ export const DocumentsPage: React.FC = () => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[35%]">Title</TableHead>
-                <TableHead>Security Level</TableHead>
-                <TableHead>Document Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead className="w-[35%]">
+                  <button
+                    type="button"
+                    onClick={() => handleSort('filename')}
+                    className="flex items-center gap-1 font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] hover:text-[#0969da] dark:hover:text-[#2f81f7] cursor-pointer"
+                  >
+                    Title {renderSortIndicator('filename')}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    onClick={() => handleSort('level')}
+                    className="flex items-center gap-1 font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] hover:text-[#0969da] dark:hover:text-[#2f81f7] cursor-pointer"
+                  >
+                    Security Level {renderSortIndicator('level')}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    onClick={() => handleSort('doc_type')}
+                    className="flex items-center gap-1 font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] hover:text-[#0969da] dark:hover:text-[#2f81f7] cursor-pointer"
+                  >
+                    Document Type {renderSortIndicator('doc_type')}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    onClick={() => handleSort('status')}
+                    className="flex items-center gap-1 font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] hover:text-[#0969da] dark:hover:text-[#2f81f7] cursor-pointer"
+                  >
+                    Status {renderSortIndicator('status')}
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    onClick={() => handleSort('created_at')}
+                    className="flex items-center gap-1 font-semibold text-xs text-[#1f2328] dark:text-[#e6edf3] hover:text-[#0969da] dark:hover:text-[#2f81f7] cursor-pointer"
+                  >
+                    Created {renderSortIndicator('created_at')}
+                  </button>
+                </TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>

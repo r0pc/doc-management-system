@@ -22,6 +22,7 @@ make (#8); prior classification rows are never touched.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,8 +46,6 @@ from app.api.v1.documents import (
     _doc_type_exists,
     _fetch_document_view,
     _resolve_level_id,
-    decode_cursor,
-    encode_cursor,
 )
 from app.api.v1.errors import not_found
 from app.db.models import (
@@ -209,6 +208,20 @@ async def _close_review_item(session: AsyncSession, item_id: uuid.UUID) -> int:
 # --- handlers ---
 
 
+def _encode_cursor(created_at: datetime, item_id: uuid.UUID) -> str:
+    raw = f"{created_at.isoformat()}|{item_id}"
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def _decode_cursor(token: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        raw = base64.urlsafe_b64decode(token.encode()).decode()
+        ts_text, id_text = raw.split("|", 1)
+        return datetime.fromisoformat(ts_text), uuid.UUID(id_text)
+    except Exception as exc:
+        raise HTTPException(HTTP_400_BAD_REQUEST, "invalid cursor") from exc
+
+
 @router.get("", response_model=ReviewPage)
 async def list_review_queue(
     user: UserCtx = Depends(deps.require(Action.RESOLVE_REVIEW)),
@@ -216,13 +229,13 @@ async def list_review_queue(
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None),
 ) -> ReviewPage:
-    after = decode_cursor(cursor) if cursor is not None else None
+    after = _decode_cursor(cursor) if cursor is not None else None
     async with sessions(user.tenant_id) as session:
         rows = await _fetch_review_page(session, user, after, limit + 1)
     has_more = len(rows) > limit
     page = rows[:limit]
     next_cursor = (
-        encode_cursor(page[-1].created_at, page[-1].review_id) if has_more and page else None
+        _encode_cursor(page[-1].created_at, page[-1].review_id) if has_more and page else None
     )
     return ReviewPage(items=page, next_cursor=next_cursor)
 
