@@ -20,6 +20,7 @@ from typing import Final, Literal
 
 from app.classification.ml.loader import MlArtifact, predict_type
 from app.classification.ml.prototypes import cosine_similarity
+from app.classification.rules.base import Recognizer
 from app.classification.rules.registry import iter_recognizers
 from app.domain.models import Finding
 from app.domain.policy import aggregate_level
@@ -105,6 +106,7 @@ def classify(
     embedding: Sequence[float] | None = None,
     prototypes: Sequence[tuple[uuid.UUID, Sequence[float]]] = (),
     prototype_threshold: float = DEFAULT_PROTOTYPE_THRESHOLD,
+    recognizers: Sequence[Recognizer] | None = None,
 ) -> ClassificationOutcome:
     """Run the fixed cascade over extracted text.
 
@@ -115,7 +117,8 @@ def classify(
     decided_by="rules" and confidence=0.0.
     """
     findings: list[Finding] = []
-    for recognizer in iter_recognizers():
+    active_recognizers = recognizers if recognizers is not None else list(iter_recognizers())
+    for recognizer in active_recognizers:
         findings.extend(recognizer.scan(extracted_text))
     level_rank = aggregate_level(findings, tax)
 

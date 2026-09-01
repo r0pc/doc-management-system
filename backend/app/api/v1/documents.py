@@ -33,7 +33,7 @@ import base64
 import json
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, BinaryIO, Final, Literal, cast
@@ -72,6 +72,7 @@ from app.domain.models import (
     UserCtx,
 )
 from app.domain.policy import can_access
+from app.domain.taxonomy import CNIC_ENTITY_TYPE, CNIC_RESTRICTED_COUNT, Taxonomy
 from app.storage.base import Storage
 from app.storage.keys import derived_key
 
@@ -225,17 +226,24 @@ def _compute_snippet(text: str, start: int, end: int, window: int = 40) -> str:
     return f"{prefix}{text[snippet_start:snippet_end]}{suffix}"
 
 
-def _contributed_level(entity_type: str, count: int = 1) -> str:
-    if entity_type in (
-        "card_number",
-        "bank_account",
-        "passport_number",
-        "salary_with_named_person",
-    ):
+_RANK_TO_NAME: Final[dict[int, str]] = {
+    1: "Public",
+    2: "Internal",
+    3: "Confidential",
+    4: "Restricted",
+}
+
+
+def _contributed_level(
+    entity_type: str,
+    count: int = 1,
+    custom_ranks: Mapping[str, int] | None = None,
+) -> str:
+    tax = Taxonomy.for_tenant(custom_ranks) if custom_ranks is not None else Taxonomy.default()
+    if entity_type == CNIC_ENTITY_TYPE and count >= CNIC_RESTRICTED_COUNT:
         return "Restricted"
-    if entity_type == "cnic":
-        return "Restricted" if count >= 3 else "Confidential"
-    return "Internal"
+    rank = tax.entity_rank.get(entity_type, 2)
+    return _RANK_TO_NAME.get(rank, "Internal")
 
 
 def _build_level_reason(level_name: str | None, findings: list[FindingOut]) -> str:

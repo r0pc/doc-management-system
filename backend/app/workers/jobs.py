@@ -33,6 +33,7 @@ from app.config import Settings
 from app.db.models import (
     Blob,
     Classification,
+    DetectorRule,
     DocType,
     DocTypePrototype,
     Document,
@@ -460,3 +461,18 @@ def load_tenant_prototypes(
             )
         ).all()
         return [(row[0], list(row[1])) for row in rows if row[1] is not None]
+
+
+def load_tenant_rules(sessions: sessionmaker[Session], tenant_id: uuid.UUID) -> list[DetectorRule]:
+    """Load all active detector rules for the tenant."""
+    with sessions() as session:
+        return list(
+            session.execute(
+                select(DetectorRule).where(
+                    DetectorRule.tenant_id == tenant_id,
+                    DetectorRule.enabled.is_(True),
+                )
+            )
+            .scalars()
+            .all()
+        )

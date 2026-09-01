@@ -43,6 +43,7 @@ from app.classification.pipeline import (
     ml_threshold_from_env,
     prototype_threshold_from_env,
 )
+from app.classification.rules.registry import iter_recognizers_for_tenant
 from app.config import Settings, resolve_storage_root
 from app.domain.taxonomy import Taxonomy
 from app.extraction.base import NeedsOcrError, ParserUnavailable, UnknownMimeError
@@ -56,6 +57,7 @@ from app.workers.jobs import (
     ProcessingJobsJournal,
     get_sync_sessions,
     load_tenant_prototypes,
+    load_tenant_rules,
     load_version_context,
     mark_document_failed,
     mark_document_held,
@@ -390,9 +392,13 @@ def _classify_body(ctx: PipelineCtx) -> None:
     payload = _read_derived_json(_require_sha256(ctx))
     tenant_id = uuid.UUID(ctx["tenant_id"])
     prototypes = load_tenant_prototypes(_sessions(), tenant_id)
+    tenant_rules = load_tenant_rules(_sessions(), tenant_id)
+    custom_ranks = {rule.entity_type: rule.level_rank for rule in tenant_rules}
+    tax = Taxonomy.for_tenant(custom_ranks)
+    recognizers = list(iter_recognizers_for_tenant(tenant_rules))
     outcome = run_classification(
         _require(payload, "text", str),
-        Taxonomy.default(),
+        tax,
         _artifact(),
         ml_threshold=ml_threshold_from_env(),
         # Reuse of the embed stage's vector; re-encoding here would be a second
@@ -400,6 +406,7 @@ def _classify_body(ctx: PipelineCtx) -> None:
         embedding=_derived_embedding(payload),
         prototypes=prototypes,
         prototype_threshold=prototype_threshold_from_env(),
+        recognizers=recognizers,
     )
     record_classification(
         _sessions(),

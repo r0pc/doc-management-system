@@ -42,6 +42,19 @@ class Taxonomy:
     def default(cls) -> Taxonomy:
         return cls(entity_rank=dict(_SPEC_ENTITY_RANKS))
 
+    @classmethod
+    def for_tenant(cls, custom_ranks: Mapping[str, int]) -> Taxonomy:
+        """Spec ranks extended with a tenant's custom detector ranks.
+
+        Custom entries EXTEND the table; they never lower a spec rank. Without
+        this, the first custom detector to match raises out of rank_for and
+        fails the whole document (#4 would journal it, but the finding is lost).
+        """
+        merged = dict(_SPEC_ENTITY_RANKS)
+        for entity_type, rank in custom_ranks.items():
+            merged[entity_type] = max(rank, merged.get(entity_type, 0))
+        return cls(entity_rank=merged)
+
     def rank_for(self, finding: Finding) -> int:
         """Rank contributed by a single finding; unknown types fail loud."""
         try:

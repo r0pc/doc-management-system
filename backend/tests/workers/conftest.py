@@ -124,6 +124,7 @@ class FakePipelineStore:
         for name in (
             "load_version_context",
             "load_tenant_prototypes",
+            "load_tenant_rules",
             "promote_blob_record",
             "replace_keywords",
             "record_classification",
@@ -137,6 +138,9 @@ class FakePipelineStore:
     def load_tenant_prototypes(
         self, sessions: object, tenant_id: uuid.UUID
     ) -> list[tuple[uuid.UUID, list[float]]]:
+        return []
+
+    def load_tenant_rules(self, sessions: object, tenant_id: uuid.UUID) -> list[object]:
         return []
 
     def load_version_context(
