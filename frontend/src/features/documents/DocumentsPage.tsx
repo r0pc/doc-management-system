@@ -139,6 +139,7 @@ export const DocumentsPage: React.FC = () => {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Status"
           className="h-7 rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
         >
           <option value="">Status: All</option>
@@ -152,6 +153,7 @@ export const DocumentsPage: React.FC = () => {
         <select
           value={levelFilter}
           onChange={(e) => setLevelFilter(e.target.value)}
+          aria-label="Security Level"
           className="h-7 rounded-md border border-[#d0d7de] dark:border-[#30363d] bg-white dark:bg-[#0d1117] text-[#1f2328] dark:text-[#e6edf3] px-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#0969da]"
         >
           <option value="">Security Level: All</option>
