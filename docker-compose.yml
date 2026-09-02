@@ -131,9 +131,16 @@ services:
       # The API embeds the SEARCH QUERY (not documents) for the pgvector arm;
       # it reads the manifest so query and corpus vectors share one model.
       MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib
+      DEV_JWT_SECRET: ${DEV_JWT_SECRET:-change-me-to-something-random}
     env_file:
       - path: .env
         required: false
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/healthz\")' || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
     depends_on:
       postgres:
         condition: service_healthy
@@ -172,6 +179,7 @@ services:
       SCAN_ENABLED: "true"
       CLAMAV_HOST: clamav
       MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib
+      DEV_JWT_SECRET: ${DEV_JWT_SECRET:-change-me-to-something-random}
       # Invariant #11's ML cascade gate. Overridable so it can be recalibrated
       # once a REAL labelled hold-out exists: today's metrics.json reports no
       # real slice (see ml/artifact_contract.md), so 0.85 is a default, not a
@@ -218,6 +226,7 @@ services:
       SCAN_ENABLED: "true"
       CLAMAV_HOST: clamav
       MODEL_ARTIFACT_PATH: /srv/app/var/models/model.joblib
+      DEV_JWT_SECRET: ${DEV_JWT_SECRET:-change-me-to-something-random}
       # Invariant #11's ML cascade gate. Overridable so it can be recalibrated
       # once a REAL labelled hold-out exists: today's metrics.json reports no
       # real slice (see ml/artifact_contract.md), so 0.85 is a default, not a
