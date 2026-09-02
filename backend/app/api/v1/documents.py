@@ -33,6 +33,7 @@ import base64
 import json
 import re
 import uuid
+from collections import Counter
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -59,6 +60,7 @@ from app.db.departments import (
 from app.db.models import (
     Blob,
     Classification,
+    Department,
     DocType,
     Document,
     DocumentDepartment,
@@ -227,6 +229,66 @@ class LabelView(BaseModel):
     level: str
     doc_type_id: uuid.UUID | None
     decided_by: str
+
+
+class StatusBreakdown(BaseModel):
+    ready: int = 0
+    processing: int = 0
+    quarantined: int = 0
+    failed: int = 0
+    held: int = 0
+
+
+class LevelStat(BaseModel):
+    name: str
+    rank: int
+    count: int
+    percentage: float
+
+
+class DocTypeStat(BaseModel):
+    name: str
+    count: int
+    percentage: float
+
+
+class DepartmentStat(BaseModel):
+    id: uuid.UUID
+    name: str
+    count: int
+
+
+class DecisionSourceStat(BaseModel):
+    source: str
+    count: int
+
+
+class DailyIngestionStat(BaseModel):
+    date: str
+    count: int
+
+
+class RecentDocumentStat(BaseModel):
+    id: uuid.UUID
+    filename: str
+    status: str
+    level: str | None
+    doc_type: str | None
+    created_at: datetime
+
+
+class DocumentStatsOut(BaseModel):
+    total_documents: int
+    total_storage_bytes: int
+    status_breakdown: StatusBreakdown
+    levels_breakdown: list[LevelStat]
+    doc_types_breakdown: list[DocTypeStat]
+    departments_breakdown: list[DepartmentStat]
+    decision_sources: list[DecisionSourceStat]
+    daily_ingestion: list[DailyIngestionStat]
+    recent_documents: list[RecentDocumentStat]
+    avg_confidence: float | None
+    pending_reviews_count: int
 
 
 # --- internal projections ---
@@ -550,6 +612,161 @@ async def _fetch_document_page(
         )
         for row in rows
     ]
+
+
+async def _fetch_document_stats(session: AsyncSession, user: UserCtx) -> DocumentStatsOut:
+    base_stmt = (
+        select(
+            Document.id,
+            Document.original_filename,
+            Document.status,
+            Document.created_at,
+            SecurityLevel.name.label("level_name"),
+            SecurityLevel.rank.label("level_rank"),
+            DocType.name.label("doc_type_name"),
+            Classification.decided_by,
+            Classification.confidence,
+            Blob.size_bytes,
+        )
+        .join(
+            Classification,
+            Document.current_classification_id == Classification.id,
+            isouter=True,
+        )
+        .join(SecurityLevel, Classification.level_id == SecurityLevel.id, isouter=True)
+        .join(DocType, Classification.doc_type_id == DocType.id, isouter=True)
+        .join(
+            DocumentVersion,
+            or_(
+                Classification.version_id == DocumentVersion.id,
+                and_(
+                    Classification.id.is_(None),
+                    DocumentVersion.document_id == Document.id,
+                ),
+            ),
+            isouter=True,
+        )
+        .join(Blob, DocumentVersion.blob_sha256 == Blob.sha256, isouter=True)
+        .where(
+            Document.tenant_id == user.tenant_id,
+            Document.deleted_at.is_(None),
+            func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK) <= user.clearance_rank,
+            department_clause(user),
+        )
+    )
+    rows = (await session.execute(base_stmt)).all()
+    total_documents = len(rows)
+    total_storage_bytes = sum(r.size_bytes or 0 for r in rows)
+
+    status_counts = Counter(r.status for r in rows)
+    status_breakdown = StatusBreakdown(
+        ready=status_counts.get("ready", 0),
+        processing=status_counts.get("processing", 0),
+        quarantined=status_counts.get("quarantined", 0),
+        failed=status_counts.get("failed", 0),
+        held=status_counts.get("held", 0),
+    )
+
+    level_names = [("Public", 1), ("Internal", 2), ("Confidential", 3), ("Restricted", 4)]
+    level_counts = Counter(r.level_name or "Internal" for r in rows)
+    levels_breakdown = [
+        LevelStat(
+            name=name,
+            rank=rank,
+            count=level_counts.get(name, 0),
+            percentage=round((level_counts.get(name, 0) / total_documents * 100), 1)
+            if total_documents > 0
+            else 0.0,
+        )
+        for name, rank in level_names
+    ]
+
+    doc_type_counts = Counter(r.doc_type_name or "Uncategorized" for r in rows)
+    doc_types_breakdown = [
+        DocTypeStat(
+            name=dt_name,
+            count=count,
+            percentage=round((count / total_documents * 100), 1) if total_documents > 0 else 0.0,
+        )
+        for dt_name, count in doc_type_counts.most_common(10)
+    ]
+
+    source_counts = Counter(r.decided_by or "default" for r in rows)
+    decision_sources = [
+        DecisionSourceStat(source=source, count=count)
+        for source, count in sorted(source_counts.items(), key=lambda x: x[1], reverse=True)
+    ]
+
+    confidences = [r.confidence for r in rows if r.confidence is not None]
+    avg_confidence = round(sum(confidences) / len(confidences), 3) if confidences else None
+
+    daily_counter = Counter(r.created_at.strftime("%Y-%m-%d") for r in rows)
+    daily_ingestion = [
+        DailyIngestionStat(date=d, count=c) for d, c in sorted(daily_counter.items())[-14:]
+    ]
+
+    sorted_recent = sorted(rows, key=lambda r: r.created_at, reverse=True)[:5]
+    recent_documents = [
+        RecentDocumentStat(
+            id=r.id,
+            filename=r.original_filename,
+            status=r.status,
+            level=r.level_name or "Internal",
+            doc_type=r.doc_type_name,
+            created_at=r.created_at,
+        )
+        for r in sorted_recent
+    ]
+
+    doc_ids = [r.id for r in rows]
+    dept_stats: list[DepartmentStat] = []
+    if doc_ids:
+        dept_rows = (
+            await session.execute(
+                select(Department.id, Department.name, func.count(DocumentDepartment.document_id))
+                .join(DocumentDepartment, DocumentDepartment.department_id == Department.id)
+                .where(
+                    DocumentDepartment.document_id.in_(doc_ids),
+                    Department.tenant_id == user.tenant_id,
+                )
+                .group_by(Department.id, Department.name)
+                .order_by(Department.name.asc())
+            )
+        ).all()
+        dept_stats = [DepartmentStat(id=row[0], name=row[1], count=row[2]) for row in dept_rows]
+
+    pending_reviews_stmt = (
+        select(func.count(ReviewItem.id))
+        .join(Document, ReviewItem.document_id == Document.id)
+        .join(
+            Classification,
+            Document.current_classification_id == Classification.id,
+            isouter=True,
+        )
+        .join(SecurityLevel, Classification.level_id == SecurityLevel.id, isouter=True)
+        .where(
+            Document.tenant_id == user.tenant_id,
+            ReviewItem.state == "pending",
+            Document.deleted_at.is_(None),
+            func.coalesce(SecurityLevel.rank, DEFAULT_FLOOR_RANK) <= user.clearance_rank,
+            department_clause(user),
+        )
+    )
+    pending_reviews_count = int((await session.execute(pending_reviews_stmt)).scalar_one() or 0)
+
+    return DocumentStatsOut(
+        total_documents=total_documents,
+        total_storage_bytes=total_storage_bytes,
+        status_breakdown=status_breakdown,
+        levels_breakdown=levels_breakdown,
+        doc_types_breakdown=doc_types_breakdown,
+        departments_breakdown=dept_stats,
+        decision_sources=decision_sources,
+        daily_ingestion=daily_ingestion,
+        recent_documents=recent_documents,
+        avg_confidence=avg_confidence,
+        pending_reviews_count=pending_reviews_count,
+    )
 
 
 async def _fetch_content_siblings(
@@ -1059,6 +1276,16 @@ async def list_documents(
         else None
     )
     return DocumentPage(items=page, next_cursor=next_cursor)
+
+
+@router.get("/stats", response_model=DocumentStatsOut)
+async def get_document_stats(
+    user: UserCtx = Depends(deps.require(Action.VIEW)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> DocumentStatsOut:
+    """Aggregated stats and metrics for documents visible to this caller."""
+    async with sessions(user.tenant_id) as session:
+        return await _fetch_document_stats(session, user)
 
 
 def _denied(view: DocumentView | None, user: UserCtx, action: Action) -> bool:

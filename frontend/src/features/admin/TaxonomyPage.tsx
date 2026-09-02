@@ -11,9 +11,10 @@ import { TableSkeleton } from '../../components/common/LoadingSkeleton';
 import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { DetectorRules } from './DetectorRules';
 import { PrototypeTrainer } from './PrototypeTrainer';
-import { Shield, FolderTree, Plus, Trash2, ShieldAlert, Cpu } from 'lucide-react';
+import { DepartmentAdmin } from './DepartmentAdmin';
+import { Shield, FolderTree, Plus, Trash2, ShieldAlert, Cpu, Building2 } from 'lucide-react';
 
-type AdminTab = 'taxonomy' | 'detectors' | 'prototypes';
+type AdminTab = 'taxonomy' | 'detectors' | 'prototypes' | 'departments';
 
 export const TaxonomyPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -83,7 +84,7 @@ export const TaxonomyPage: React.FC = () => {
           Taxonomy & Extensibility Administration
         </h2>
         <p className="text-xs text-[#656d76] dark:text-[#848d97] mt-0.5">
-          Manage Security Levels, Document Types, Custom PII Detector Rules (#10), and Few-Shot Prototype Classifiers.
+          Manage Security Levels, Document Types, Departments & Org Units, Custom PII Detector Rules (#10), and Prototype Classifiers.
         </p>
       </div>
 
@@ -102,6 +103,20 @@ export const TaxonomyPage: React.FC = () => {
         >
           <FolderTree className="w-3.5 h-3.5" />
           Taxonomy & Levels
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'departments'}
+          onClick={() => setActiveTab('departments')}
+          className={`flex items-center gap-2 px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
+            activeTab === 'departments'
+              ? 'border-[#0969da] text-[#0969da] dark:border-[#2f81f7] dark:text-[#2f81f7]'
+              : 'border-transparent text-[#656d76] dark:text-[#848d97] hover:text-[#1f2328] dark:hover:text-[#e6edf3]'
+          }`}
+        >
+          <Building2 className="w-3.5 h-3.5" />
+          Departments
         </button>
         <button
           type="button"
@@ -132,6 +147,8 @@ export const TaxonomyPage: React.FC = () => {
           Prototype Classifier
         </button>
       </div>
+
+      {activeTab === 'departments' && <DepartmentAdmin />}
 
       {activeTab === 'detectors' && <DetectorRules />}
 

@@ -249,3 +249,77 @@ export interface DetectorMatchOut {
 export interface DetectorPreviewResponse {
   matches: DetectorMatchOut[];
 }
+
+export interface DepartmentOut {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  is_root: boolean;
+  assignable: boolean;
+}
+
+export interface DepartmentCreate {
+  name: string;
+  parent_id?: string | null;
+}
+
+export interface StatusBreakdown {
+  ready: number;
+  processing: number;
+  quarantined: number;
+  failed: number;
+  held: number;
+}
+
+export interface LevelStat {
+  name: string;
+  rank: number;
+  count: number;
+  percentage: number;
+}
+
+export interface DocTypeStat {
+  name: string;
+  count: number;
+  percentage: number;
+}
+
+export interface DepartmentStat {
+  id: string;
+  name: string;
+  count: number;
+}
+
+export interface DecisionSourceStat {
+  source: string;
+  count: number;
+}
+
+export interface DailyIngestionStat {
+  date: string;
+  count: number;
+}
+
+export interface RecentDocumentStat {
+  id: string;
+  filename: string;
+  status: DocumentStatus;
+  level: string | null;
+  doc_type: string | null;
+  created_at: string;
+}
+
+export interface DocumentStatsOut {
+  total_documents: number;
+  total_storage_bytes: number;
+  status_breakdown: StatusBreakdown;
+  levels_breakdown: LevelStat[];
+  doc_types_breakdown: DocTypeStat[];
+  departments_breakdown: DepartmentStat[];
+  decision_sources: DecisionSourceStat[];
+  daily_ingestion: DailyIngestionStat[];
+  recent_documents: RecentDocumentStat[];
+  avg_confidence: number | null;
+  pending_reviews_count: number;
+}
+

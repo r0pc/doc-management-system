@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  BarChart3,
   FileText,
   UploadCloud,
   CheckSquare,
@@ -12,7 +13,7 @@ import { Action } from '../../security/permissions';
 import { Can } from '../../security/Can';
 import { NavLink } from 'react-router-dom';
 
-export type NavTab = 'documents' | 'upload' | 'review' | 'search' | 'audit' | 'admin';
+export type NavTab = 'dashboard' | 'documents' | 'upload' | 'review' | 'search' | 'audit' | 'admin';
 
 interface SidebarProps {
   reviewCount?: number;
@@ -28,6 +29,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     action?: Action;
     badge?: number;
   }> = [
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
+      icon: <BarChart3 className="w-4 h-4" />,
+    },
     {
       id: 'documents',
       label: 'Documents',

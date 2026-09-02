@@ -4,6 +4,7 @@ import { AuthProvider } from './api/auth';
 import { ThemeProvider } from './components/theme/ThemeProvider';
 import { api } from './api/client';
 import { AppLayout } from './components/layout/AppLayout';
+import { DashboardPage } from './features/dashboard/DashboardPage';
 import { DocumentsPage } from './features/documents/DocumentsPage';
 import { UploadPage } from './features/upload/UploadPage';
 import { ReviewPage } from './features/review/ReviewPage';
@@ -42,7 +43,8 @@ function AuthenticatedApp() {
   return (
     <AppLayout reviewCount={pendingCount}>
       <Routes>
-        <Route path="/" element={<Navigate to="/documents" replace />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/review" element={<ReviewPage />} />
