@@ -19,22 +19,30 @@ spec §6), so no visibility axes apply here — only the MANAGE_TAXONOMY gate.
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.status import HTTP_409_CONFLICT
+from starlette.status import (
+    HTTP_404_NOT_FOUND,
+    HTTP_409_CONFLICT,
+    HTTP_422_UNPROCESSABLE_ENTITY,
+    HTTP_503_SERVICE_UNAVAILABLE,
+)
 
 from app.api import deps
+from app.classification.ml.loader import embed_sample_text
 from app.classification.ml.prototypes import MAX_SAMPLES, MIN_SAMPLES, compute_centroid
 from app.classification.rules.configured import ConfiguredRecognizer
 from app.classification.rules.safety import PatternUnsafeError, assert_pattern_safe
 from app.classification.rules.validators import VALIDATORS
+from app.config import Settings
 from app.db.models import (
     Classification,
     DetectorRule,
@@ -46,6 +54,10 @@ from app.db.models import (
     SecurityLevel,
 )
 from app.domain.models import Action, UserCtx
+from app.extraction.registry import extract_document
+from app.workers.scanning import CLAMAV_HOST, CLAMAV_PORT, ScanError, clamd_scan
+
+settings = Settings()
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -81,6 +93,13 @@ class TrainPrototypeResponse(BaseModel):
     doc_type_id: uuid.UUID
     sample_count: int
     dimension: int
+
+
+class DocTypePrototypeOut(BaseModel):
+    id: uuid.UUID
+    doc_type_id: uuid.UUID
+    sample_count: int
+    updated_at: datetime.datetime
 
 
 class DetectorRuleOut(BaseModel):
@@ -179,12 +198,21 @@ async def _doc_type_name_conflicts(
 
 
 async def _insert_doc_type(
-    session: AsyncSession, *, name: str, parent_id: uuid.UUID | None, description: str
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    name: str,
+    parent_id: uuid.UUID | None,
+    description: str,
 ) -> uuid.UUID:
     doc_type_id = uuid.uuid4()
     await session.execute(
         insert(DocType).values(
-            id=doc_type_id, name=name, parent_id=parent_id, description=description
+            id=doc_type_id,
+            tenant_id=tenant_id,
+            name=name,
+            parent_id=parent_id,
+            description=description,
         )
     )
     return doc_type_id
@@ -259,6 +287,49 @@ async def _upsert_prototype(
         )
     )
     await session.execute(stmt)
+
+
+async def _delete_prototype(
+    session: AsyncSession, *, tenant_id: uuid.UUID, doc_type_id: uuid.UUID
+) -> int:
+    stmt = delete(DocTypePrototype).where(
+        DocTypePrototype.tenant_id == tenant_id,
+        DocTypePrototype.doc_type_id == doc_type_id,
+    )
+    res = await session.execute(stmt)
+    return int(cast("CursorResult[Any]", res).rowcount or 0)
+
+
+async def _delete_all_prototypes(session: AsyncSession, *, tenant_id: uuid.UUID) -> int:
+    stmt = delete(DocTypePrototype).where(DocTypePrototype.tenant_id == tenant_id)
+    res = await session.execute(stmt)
+    return int(cast("CursorResult[Any]", res).rowcount or 0)
+
+
+async def _fetch_prototypes(
+    session: AsyncSession, tenant_id: uuid.UUID
+) -> list[DocTypePrototypeOut]:
+    rows = (
+        await session.execute(
+            select(
+                DocTypePrototype.id,
+                DocTypePrototype.doc_type_id,
+                DocTypePrototype.sample_count,
+                DocTypePrototype.updated_at,
+            )
+            .where(DocTypePrototype.tenant_id == tenant_id)
+            .order_by(DocTypePrototype.updated_at.desc())
+        )
+    ).all()
+    return [
+        DocTypePrototypeOut(
+            id=r.id,
+            doc_type_id=r.doc_type_id,
+            sample_count=r.sample_count,
+            updated_at=r.updated_at,
+        )
+        for r in rows
+    ]
 
 
 async def _fetch_detector_rules(
@@ -403,6 +474,7 @@ async def create_doc_type(
             )
         doc_type_id = await _insert_doc_type(
             session,
+            tenant_id=user.tenant_id,
             name=payload.name,
             parent_id=payload.parent_id,
             description=payload.description,
@@ -494,6 +566,181 @@ async def train_doc_type_prototype(
         sample_count=len(payload.document_ids),
         dimension=len(centroid),
     )
+
+
+@router.post("/doc-types/{doc_type_id}/prototype-upload", response_model=TrainPrototypeResponse)
+async def train_doc_type_prototype_upload(
+    request: Request,
+    doc_type_id: uuid.UUID,
+    files: list[UploadFile] = File(...),
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> TrainPrototypeResponse:
+    """Train a prototype vector from directly uploaded sample files.
+
+    Scans for malware, extracts text, and computes sentence-transformer embeddings
+    purely in memory to compute the centroid. Uploaded files are NEVER saved to
+    storage or recorded in repository document tables.
+    """
+    if len(files) < MIN_SAMPLES:
+        raise HTTPException(
+            HTTP_422_UNPROCESSABLE_ENTITY,
+            f"need at least {MIN_SAMPLES} sample files, got {len(files)}",
+        )
+    if len(files) > MAX_SAMPLES:
+        raise HTTPException(
+            HTTP_422_UNPROCESSABLE_ENTITY,
+            f"maximum {MAX_SAMPLES} sample files allowed, got {len(files)}",
+        )
+
+    embeddings: list[list[float]] = []
+    for file in files:
+        data = await file.read()
+        if not data:
+            raise HTTPException(
+                HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Sample file '{file.filename or 'unnamed'}' is empty",
+            )
+        # 1. Malware scan
+        try:
+            verdict = clamd_scan(CLAMAV_HOST, CLAMAV_PORT, data)
+            if not verdict.clean:
+                raise HTTPException(
+                    HTTP_422_UNPROCESSABLE_ENTITY,
+                    f"Malware detected in sample '{file.filename}': {verdict.signature}",
+                )
+        except ScanError as exc:
+            if settings.env == "dev":
+                pass
+            else:
+                raise HTTPException(
+                    HTTP_503_SERVICE_UNAVAILABLE,
+                    "Malware scanning service is temporarily unavailable",
+                ) from exc
+
+        # 2. Text extraction
+        try:
+            extracted = extract_document(data)
+        except Exception as exc:
+            raise HTTPException(
+                HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Failed to extract text from '{file.filename}': {exc}",
+            ) from exc
+
+        if not extracted.text or not extracted.text.strip():
+            raise HTTPException(
+                HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Sample file '{file.filename}' contains no extractable text",
+            )
+
+        # 3. Embedding
+        vector = embed_sample_text(extracted.text)
+        if vector is None:
+            raise HTTPException(
+                HTTP_503_SERVICE_UNAVAILABLE,
+                f"Embedding model unavailable for sample '{file.filename}'",
+            )
+        embeddings.append(vector)
+
+    # 4. Centroid
+    try:
+        centroid = compute_centroid(embeddings)
+    except ValueError as err:
+        raise HTTPException(HTTP_422_UNPROCESSABLE_ENTITY, str(err)) from err
+
+    # 5. Persist prototype & audit log (no documents/blobs saved)
+    async with sessions(user.tenant_id) as session:
+        doc_type_exists = (
+            await session.execute(select(DocType.id).where(DocType.id == doc_type_id))
+        ).scalar_one_or_none()
+        if doc_type_exists is None:
+            raise HTTPException(HTTP_404_NOT_FOUND, "document type not found")
+
+        await _upsert_prototype(
+            session,
+            tenant_id=user.tenant_id,
+            doc_type_id=doc_type_id,
+            centroid=centroid,
+            sample_count=len(files),
+        )
+        actor_id = await deps.provision_actor(session, user)
+        await deps.record_audit(
+            session,
+            tenant_id=user.tenant_id,
+            document_id=None,
+            actor_id=actor_id,
+            action="prototype.train",
+            request=request,
+            detail=f"doc_type_id={doc_type_id},sample_count={len(files)},source=direct_upload",
+        )
+        await session.commit()
+
+    return TrainPrototypeResponse(
+        doc_type_id=doc_type_id,
+        sample_count=len(files),
+        dimension=len(centroid),
+    )
+
+
+@router.get("/prototypes", response_model=list[DocTypePrototypeOut])
+async def list_prototypes(
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> list[DocTypePrototypeOut]:
+    """List all trained document type prototypes for the tenant."""
+    async with sessions(user.tenant_id) as session:
+        return await _fetch_prototypes(session, user.tenant_id)
+
+
+@router.delete("/doc-types/{doc_type_id}/prototype", status_code=204)
+async def reset_doc_type_prototype(
+    request: Request,
+    doc_type_id: uuid.UUID,
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> Response:
+    """Reset / delete a trained prototype vector for a specific document type."""
+    async with sessions(user.tenant_id) as session:
+        deleted = await _delete_prototype(
+            session, tenant_id=user.tenant_id, doc_type_id=doc_type_id
+        )
+        if deleted > 0:
+            actor_id = await deps.provision_actor(session, user)
+            await deps.record_audit(
+                session,
+                tenant_id=user.tenant_id,
+                document_id=None,
+                actor_id=actor_id,
+                action="prototype.reset",
+                request=request,
+                detail=f"doc_type_id={doc_type_id}",
+            )
+            await session.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/prototypes", status_code=204)
+async def reset_all_prototypes(
+    request: Request,
+    user: UserCtx = Depends(deps.require(Action.MANAGE_TAXONOMY)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> Response:
+    """Reset / delete all trained prototype vectors for the tenant."""
+    async with sessions(user.tenant_id) as session:
+        deleted = await _delete_all_prototypes(session, tenant_id=user.tenant_id)
+        if deleted > 0:
+            actor_id = await deps.provision_actor(session, user)
+            await deps.record_audit(
+                session,
+                tenant_id=user.tenant_id,
+                document_id=None,
+                actor_id=actor_id,
+                action="prototype.reset_all",
+                request=request,
+                detail=f"deleted_count={deleted}",
+            )
+            await session.commit()
+    return Response(status_code=204)
 
 
 @router.get("/security-levels", response_model=list[SecurityLevelOut])

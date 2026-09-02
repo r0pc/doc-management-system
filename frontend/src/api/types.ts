@@ -53,6 +53,23 @@ export interface DocumentPage {
   next_cursor: string | null;
 }
 
+export interface RenameDocumentRequest {
+  filename: string;
+}
+
+export interface BulkRenameItem {
+  document_id: string;
+  new_filename: string;
+}
+
+export interface BulkRenameRequest {
+  items: BulkRenameItem[];
+}
+
+export interface BulkRenameResponse {
+  renamed: string[];
+}
+
 export interface FindingOut {
   entity_type: string;
   rule_id: string;
@@ -208,6 +225,13 @@ export interface TrainPrototypeResponse {
   doc_type_id: string;
   sample_count: number;
   dimension: number;
+}
+
+export interface DocTypePrototypeOut {
+  id: string;
+  doc_type_id: string;
+  sample_count: number;
+  updated_at: string;
 }
 
 export interface DetectorRuleOut {

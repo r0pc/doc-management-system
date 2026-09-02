@@ -42,9 +42,15 @@ def install_admin_fakes(
         return name_conflict
 
     async def insert_type(
-        session: Any, *, name: str, parent_id: UUID | None, description: str
+        session: Any,
+        *,
+        tenant_id: UUID | None = None,
+        name: str,
+        parent_id: UUID | None,
+        description: str,
     ) -> UUID:
         captured["insert_session"] = session
+        captured["insert_tenant"] = tenant_id
         captured["insert_name"] = name
         captured["insert_parent"] = parent_id
         captured["insert_description"] = description

@@ -433,4 +433,25 @@ describe('DocumentDrawer — classifier engine attribution', () => {
     const engine = await screen.findByTestId('classifier-engine');
     expect(engine.textContent).not.toMatch(/%/);
   });
+
+  it('allows renaming the document filename inline', async () => {
+    routeApi('Internal');
+    const user = userEvent.setup();
+    renderWithProviders(<DocumentDrawer documentId={DOC_ID} onClose={() => {}} />, {
+      persona: PERSONA_ADMIN,
+    });
+
+    const renameButton = await screen.findByRole('button', { name: /rename document/i });
+    await user.click(renameButton);
+
+    const input = screen.getByLabelText(/new document name/i);
+    expect(input).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, 'updated_report.pdf');
+
+    const saveButton = screen.getByRole('button', { name: /save document name/i });
+    expect(saveButton).toBeEnabled();
+  });
 });
+

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DocumentDepartments } from '../departments/DocumentDepartments';
 import { api } from '../../api/client';
 import { DocumentListItem, JobOut, FindingOut, DocumentPreviewOut } from '../../api/types';
 import { LevelBadge } from '../../components/common/LevelBadge';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 import { LoadingSkeleton } from '../../components/common/LoadingSkeleton';
 import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { formatDate } from '../../lib/utils';
@@ -20,6 +21,8 @@ import {
   Tag,
   Cpu,
   Eye,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { trapFocus } from '../../lib/focus-trap';
 import { Can } from '../../security/Can';
@@ -72,10 +75,14 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
   onClose,
   onReclassify,
 }) => {
+  const queryClient = useQueryClient();
   const [downloading, setDownloading] = useState(false);
   const [openingInBrowser, setOpeningInBrowser] = useState(false);
   const [downloadError, setDownloadError] = useState<unknown>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [renameError, setRenameError] = useState<unknown>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -129,6 +136,38 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
     enabled: !!documentId,
     refetchInterval: doc?.status === 'processing' ? 2000 : false,
   });
+
+  useEffect(() => {
+    if (doc?.filename) {
+      setNameInput(doc.filename);
+    }
+  }, [doc?.filename]);
+
+  const renameMutation = useMutation({
+    mutationFn: async (newName: string) => {
+      return api.patch<DocumentListItem>(`/v1/documents/${documentId}`, {
+        filename: newName,
+      });
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['document', documentId], updated);
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      setIsEditingName(false);
+      setRenameError(null);
+    },
+    onError: (err) => {
+      setRenameError(err);
+    },
+  });
+
+  const handleSaveName = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nameInput.trim() || nameInput.trim() === doc?.filename) {
+      setIsEditingName(false);
+      return;
+    }
+    renameMutation.mutate(nameInput.trim());
+  };
 
   const handleDownload = async () => {
     if (!doc) return;
@@ -239,6 +278,7 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
             ) : doc ? (
               <>
                 <ProblemAlert error={downloadError} />
+                <ProblemAlert error={renameError} />
 
                 {doc.duplicate_of && doc.duplicate_of.length > 0 && (
                   <div className="p-3 rounded-md bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/50 flex gap-2 text-blue-900 dark:text-blue-200">
@@ -254,10 +294,63 @@ export const DocumentDrawer: React.FC<DocumentDrawerProps> = ({
                 {/* Primary Metadata Box */}
                 <div className="space-y-3 pb-5 border-b border-[#d8dee4] dark:border-[#30363d]">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-base font-bold text-[#1f2328] dark:text-[#e6edf3]">
-                        {doc.filename}
-                      </h2>
+                    <div className="flex-1 min-w-0">
+                      {isEditingName ? (
+                        <form onSubmit={handleSaveName} className="flex items-center gap-1.5 mt-0.5">
+                          <Input
+                            type="text"
+                            value={nameInput}
+                            onChange={(e) => setNameInput(e.target.value)}
+                            disabled={renameMutation.isPending}
+                            autoFocus
+                            aria-label="New document name"
+                            className="h-7 text-xs font-semibold px-2 py-0 max-w-sm"
+                          />
+                          <Button
+                            type="submit"
+                            size="sm"
+                            variant="default"
+                            disabled={renameMutation.isPending || !nameInput.trim()}
+                            aria-label="Save document name"
+                            className="h-7 px-2 text-[11px]"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setIsEditingName(false);
+                              setNameInput(doc.filename);
+                            }}
+                            disabled={renameMutation.isPending}
+                            aria-label="Cancel renaming"
+                            className="h-7 px-2 text-[11px]"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </form>
+                      ) : (
+                        <div className="flex items-center gap-2 group">
+                          <h2 className="text-base font-bold text-[#1f2328] dark:text-[#e6edf3] truncate" title={doc.filename}>
+                            {doc.filename}
+                          </h2>
+                          <Can action={Action.UPLOAD}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNameInput(doc.filename);
+                                setIsEditingName(true);
+                              }}
+                              aria-label="Rename document"
+                              className="opacity-70 group-hover:opacity-100 p-1 text-[#656d76] dark:text-[#848d97] hover:text-[#0969da] dark:hover:text-[#2f81f7] hover:bg-[#eaeef2] dark:hover:bg-[#30363d] rounded transition-all shrink-0"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          </Can>
+                        </div>
+                      )}
                       <p className="text-[11px] font-mono text-[#656d76] dark:text-[#848d97] mt-0.5">
                         ID: {doc.id}
                       </p>

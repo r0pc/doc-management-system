@@ -224,6 +224,23 @@ class DeleteResponse(BaseModel):
     deleted: list[uuid.UUID]
 
 
+class RenameDocumentRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+
+
+class BulkRenameItem(BaseModel):
+    document_id: uuid.UUID
+    new_filename: str = Field(min_length=1, max_length=255)
+
+
+class BulkRenameRequest(BaseModel):
+    items: list[BulkRenameItem] = Field(min_length=1, max_length=500)
+
+
+class BulkRenameResponse(BaseModel):
+    renamed: list[uuid.UUID]
+
+
 class LabelView(BaseModel):
     document_id: uuid.UUID
     level: str
@@ -1000,6 +1017,28 @@ async def _close_pending_reviews(session: AsyncSession, document_id: uuid.UUID) 
     return int(rowcount or 0)
 
 
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize and validate user-supplied filename."""
+    cleaned = filename.strip()
+    cleaned = re.sub(r"[\x00-\x1f\x7f/\\]", "_", cleaned)
+    cleaned = cleaned.strip(". ")
+    if not cleaned:
+        raise HTTPException(HTTP_400_BAD_REQUEST, "invalid or empty filename")
+    if len(cleaned) > 255:
+        cleaned = cleaned[:255]
+    return cleaned
+
+
+async def _update_document_filename(
+    session: AsyncSession, document_id: uuid.UUID, new_filename: str
+) -> None:
+    await session.execute(
+        update(Document)
+        .where(Document.id == document_id)
+        .values(original_filename=new_filename)
+    )
+
+
 # --- handlers ---
 
 
@@ -1233,6 +1272,45 @@ async def auto_classify_documents(
     return AutoClassifyResponse(reclassified=ordered)
 
 
+@router.post("/bulk-rename", response_model=BulkRenameResponse)
+async def bulk_rename_documents(
+    request: Request,
+    payload: BulkRenameRequest,
+    user: UserCtx = Depends(deps.require(Action.UPLOAD)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> BulkRenameResponse:
+    """Batch-rename a selection of documents with same-transaction audit logging (#30)."""
+    item_map = {item.document_id: item.new_filename for item in payload.items}
+    requested_ids = list(item_map.keys())
+
+    async with sessions(user.tenant_id) as session:
+        accessible_ids = await _fetch_deletable_document_ids(session, user, requested_ids)
+        accessible_set = set(accessible_ids)
+        actor_id = await deps.provision_actor(session, user)
+
+        for doc_id in requested_ids:
+            if doc_id in accessible_set:
+                view = await _fetch_document_view(session, doc_id)
+                if view is not None:
+                    new_name = _sanitize_filename(item_map[doc_id])
+                    old_name = view.original_filename
+                    await _update_document_filename(session, doc_id, new_name)
+                    await deps.record_audit(
+                        session,
+                        tenant_id=user.tenant_id,
+                        document_id=doc_id,
+                        actor_id=actor_id,
+                        action="document.rename",
+                        request=request,
+                        detail=f"old_filename={old_name},new_filename={new_name}",
+                    )
+
+        await session.commit()
+
+    ordered = [d for d in requested_ids if d in accessible_set]
+    return BulkRenameResponse(renamed=ordered)
+
+
 @router.get("", response_model=DocumentPage)
 async def list_documents(
     user: UserCtx = Depends(deps.require(Action.VIEW)),
@@ -1321,6 +1399,48 @@ async def get_document(
             doc_type=view.doc_type_name,
             created_at=view.created_at,
             duplicate_of=siblings,
+            level_rank=view.level_rank,
+            department_ids=sorted(view.department_ids),
+        )
+
+
+@router.patch("/{document_id}", response_model=DocumentListItem)
+async def rename_document(
+    request: Request,
+    document_id: uuid.UUID,
+    payload: RenameDocumentRequest,
+    user: UserCtx = Depends(deps.require(Action.UPLOAD)),
+    sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
+) -> DocumentListItem | Response:
+    """Rename an individual document with same-transaction audit logging (#30)."""
+    sanitized = _sanitize_filename(payload.filename)
+    async with sessions(user.tenant_id) as session:
+        view = await _fetch_document_view(session, document_id)
+        if _denied(view, user, Action.UPLOAD) or view is None:
+            return not_found()
+        old_filename = view.original_filename
+        await _update_document_filename(session, document_id, sanitized)
+        actor_id = await deps.provision_actor(session, user)
+        await deps.record_audit(
+            session,
+            tenant_id=user.tenant_id,
+            document_id=document_id,
+            actor_id=actor_id,
+            action="document.rename",
+            request=request,
+            detail=f"old_filename={old_filename},new_filename={sanitized}",
+        )
+        siblings = await _fetch_content_siblings(session, document_id, user.tenant_id)
+        await session.commit()
+
+        return DocumentListItem(
+            id=view.id,
+            filename=sanitized,
+            status=view.status,
+            level=view.level_name,
+            doc_type=view.doc_type_name,
+            created_at=view.created_at,
+            duplicate_of=siblings or [],
             level_rank=view.level_rank,
             department_ids=sorted(view.department_ids),
         )

@@ -201,7 +201,7 @@ export const api = {
   post: <T>(path: string, body?: unknown) => {
     return request<T>(path, {
       method: 'POST',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
     });
   },
 

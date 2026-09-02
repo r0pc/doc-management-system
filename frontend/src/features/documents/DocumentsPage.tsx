@@ -10,8 +10,9 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { ProblemAlert } from '../../components/common/ProblemAlert';
 import { DocumentDrawer } from './DocumentDrawer';
 import { ReclassifyModal } from './ReclassifyModal';
+import { BulkRenameModal } from './BulkRenameModal';
 import { formatDate } from '../../lib/utils';
-import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Eye, FileText, Filter, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Building2, Eye, FileEdit, FileText, Filter, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from '../../security/usePermissions';
 import { Action } from '../../security/permissions';
@@ -35,6 +36,7 @@ export const DocumentsPage: React.FC = () => {
   const canDelete = can(Action.DELETE);
   const canReclassify = can(Action.RECLASSIFY);
   const canManageDepartments = can(Action.MANAGE_DEPARTMENTS);
+  const canUpload = can(Action.UPLOAD);
   const canSelect = canDelete || canReclassify || canManageDepartments;
   const { data: departments } = useDepartments(canManageDepartments);
   const queryClient = useQueryClient();
@@ -50,6 +52,7 @@ export const DocumentsPage: React.FC = () => {
   const [departmentSelection, setDepartmentSelection] = useState<Set<string>>(new Set());
   const [autoClassifyConfirming, setAutoClassifyConfirming] = useState(false);
   const [autoClassifyError, setAutoClassifyError] = useState<unknown>(null);
+  const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
 
   const clearSelection = () => setSelected(new Set());
 
@@ -258,6 +261,17 @@ export const DocumentsPage: React.FC = () => {
                 className="h-7 px-2 text-[11px] text-[#1f2328] dark:text-[#e6edf3]"
               >
                 <Building2 className="w-3 h-3 mr-1" /> Departments {selectedVisible.length}
+              </Button>
+            )}
+            {canUpload && (
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="bulk-rename-selected"
+                onClick={() => setBulkRenameOpen(true)}
+                className="h-7 px-2 text-[11px] text-[#1f2328] dark:text-[#e6edf3]"
+              >
+                <FileEdit className="w-3 h-3 mr-1" /> Rename {selectedVisible.length}
               </Button>
             )}
             {canDelete && (
@@ -670,6 +684,16 @@ export const DocumentsPage: React.FC = () => {
       <ReclassifyModal
         document={reclassifyingDoc}
         onClose={() => setReclassifyingDoc(null)}
+      />
+
+      {/* Bulk Rename Modal */}
+      <BulkRenameModal
+        isOpen={bulkRenameOpen}
+        documents={documents.filter((d) => selected.has(d.id))}
+        onClose={() => setBulkRenameOpen(false)}
+        onSuccess={() => {
+          clearSelection();
+        }}
       />
     </div>
   );

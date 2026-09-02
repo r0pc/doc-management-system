@@ -274,3 +274,21 @@ describe('DocumentsPage — department re-assignment', () => {
     expect(screen.queryByTestId('set-departments-selected')).not.toBeInTheDocument();
   });
 });
+
+describe('DocumentsPage — bulk rename', () => {
+  it('shows rename control when rows are selected for users with Action.UPLOAD', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    expect(screen.getByTestId('bulk-rename-selected')).toBeInTheDocument();
+  });
+
+  it('opens bulk rename modal when rename button is clicked', async () => {
+    renderWithProviders(<DocumentsPage />, { persona: PERSONA_ADMIN });
+    await screen.findByTestId('documents-table');
+    await userEvent.click(rowCheckbox('a.pdf'));
+    await userEvent.click(screen.getByTestId('bulk-rename-selected'));
+    expect(screen.getByRole('dialog', { name: /bulk rename documents/i })).toBeInTheDocument();
+  });
+});
+

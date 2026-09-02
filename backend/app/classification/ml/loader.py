@@ -29,7 +29,12 @@ from typing import Any, Final
 
 from pydantic import ValidationError
 
-from app.classification.ml.artifact import ArtifactManifest, hard_errors, validate_manifest
+from app.classification.ml.artifact import (
+    EMBEDDING_MODEL_ID,
+    ArtifactManifest,
+    hard_errors,
+    validate_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +200,20 @@ def embed_text(artifact: MlArtifact | None, text: str) -> list[float] | None:
         return None
     except Exception as exc:  # broad by contract: an encoder fault must not fail ingestion
         logger.warning("ml_embed_failed error=%s reason=%s", type(exc).__name__, exc)
+        return None
+
+
+def embed_sample_text(text: str, model_id: str = EMBEDDING_MODEL_ID) -> list[float] | None:
+    """Encode standalone sample text with the default sentence transformer."""
+    try:
+        encoder = _get_encoder(model_id)
+        encoded = encoder.encode([text[:EMBED_EXCERPT_CHARS]], show_progress_bar=False)
+        return [float(value) for value in encoded[0]]
+    except MlUnavailableError as exc:
+        logger.info("ml_sample_embed_unavailable reason=%s", exc)
+        return None
+    except Exception as exc:
+        logger.warning("ml_sample_embed_failed error=%s reason=%s", type(exc).__name__, exc)
         return None
 
 
