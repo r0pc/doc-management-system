@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose up -d --wait
-      - run: cd backend && alembic upgrade head
+      - run: docker compose run --rm migrate
       - run: cd frontend && npm ci && npx playwright install --with-deps chromium
       - run: cd frontend && npm run build && npm run test:e2e
       - uses: actions/upload-artifact@v4
