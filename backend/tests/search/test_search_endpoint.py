@@ -112,6 +112,25 @@ def test_level_filter_lands_inside_candidate_statement(
     assert "restricted" in [str(value) for value in params.values()]
 
 
+def test_department_and_doctype_filters_land_inside_candidate_statement(
+    client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = install_seams(monkeypatch, keyword_rows=[], meta={})
+    dept_id = uuid.uuid4()
+
+    response = client.get(
+        "/v1/search",
+        params={"q": "contract", "doc_type": "Invoice", "department_id": str(dept_id)},
+    )
+
+    assert response.status_code == 200
+    params = captured["keyword_stmt"].compile(dialect=postgresql.dialect()).params
+    param_strs = [str(value) for value in params.values()]
+    assert "Invoice" in param_strs
+    assert str(dept_id) in param_strs
+
+
+
 def test_viewer_role_can_search(client_factory: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     install_seams(monkeypatch, keyword_rows=[], meta={})
     client = client_factory(user=make_user(role="viewer"))

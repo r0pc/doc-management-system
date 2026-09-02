@@ -82,6 +82,7 @@ async def search(
     limit: int = Query(default=DEFAULT_SEARCH_LIMIT, ge=1, le=MAX_SEARCH_LIMIT),
     level: LevelName | None = Query(default=None),
     doc_type: str | None = Query(default=None),
+    department_id: uuid.UUID | None = Query(default=None),
     user: UserCtx = Depends(deps.require(Action.VIEW)),
     sessions: deps.TenantSessionOpener = Depends(deps.get_tenant_sessions),
     settings: Settings = Depends(deps.get_settings),
@@ -100,6 +101,7 @@ async def search(
             limit=limit,
             level=level,
             doc_type=doc_type,
+            department_id=department_id,
             query_embedding=query_embedding,
         )
     return SearchResponse(

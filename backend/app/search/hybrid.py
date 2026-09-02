@@ -216,6 +216,7 @@ async def search_documents(
     limit: int = DEFAULT_LIMIT,
     level: LevelName | None = None,
     doc_type: str | None = None,
+    department_id: uuid.UUID | None = None,
     query_embedding: Sequence[float] | None = None,
 ) -> SearchResult:
     """Execute both arms over the caller's filtered candidates, fuse via RRF.
@@ -229,7 +230,9 @@ async def search_documents(
     model dependency: None simply yields a zero-row vector arm and keyword-only
     results, which is the correct behaviour on a deployment with no artifact.
     """
-    candidates_stmt = build_visible_candidates(user, level=level, doc_type=doc_type)
+    candidates_stmt = build_visible_candidates(
+        user, level=level, doc_type=doc_type, department_id=department_id
+    )
     candidates = candidates_stmt.subquery(name="candidates")
     if query_embedding is None:
         logger.debug("vector_arm_inactive: no query embedding; keyword-only search")

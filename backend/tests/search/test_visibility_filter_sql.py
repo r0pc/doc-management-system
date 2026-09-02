@@ -112,6 +112,16 @@ def test_optional_level_and_doc_type_filters_apply_inside_candidates() -> None:
     assert "msa" in values
 
 
+def test_optional_department_filter_applies_inside_candidates() -> None:
+    stmt = build_visible_candidates(make_user(tenant_id=TENANT), department_id=DEPT_1)
+    sql = compile_sql(stmt)
+
+    assert "document_departments" in sql
+    values = param_values(stmt)
+    assert str(DEPT_1) in values
+
+
+
 # --- arms: predicates ride inside, ranking on top ---
 
 

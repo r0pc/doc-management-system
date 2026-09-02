@@ -22,7 +22,14 @@ from typing import Any
 
 from sqlalchemy import Select, Subquery, false, func, select
 
-from app.db.models import Classification, DocType, Document, DocumentText, SecurityLevel
+from app.db.models import (
+    Classification,
+    DocType,
+    Document,
+    DocumentDepartment,
+    DocumentText,
+    SecurityLevel,
+)
 from app.db.visibility import department_clause
 from app.domain.models import DEFAULT_FLOOR_RANK, LevelName, UserCtx
 
@@ -31,14 +38,18 @@ VECTOR_ARM_LIMIT = 100
 
 
 def build_visible_candidates(
-    user: UserCtx, *, level: LevelName | None = None, doc_type: str | None = None
+    user: UserCtx,
+    *,
+    level: LevelName | None = None,
+    doc_type: str | None = None,
+    department_id: Any | None = None,
 ) -> Select[Any]:
     """Version-scoped candidate rows the caller may ever see.
 
     Both access axes live in this single WHERE (#25): clearance rank via the
     COALESCE'd security_levels.rank (unlabelled falls UP to the Internal floor,
     #9), department subtree via the NULL-or-whitelist predicate. Optional
-    level/doc_type facets filters are applied HERE too, so facet counts stay
+    level/doc_type/department facets filters are applied HERE too, so facet counts stay
     consistent with results by construction (#28).
     """
     stmt = (
@@ -69,6 +80,15 @@ def build_visible_candidates(
         stmt = stmt.where(SecurityLevel.name == level.value)
     if doc_type is not None:
         stmt = stmt.where(DocType.name == doc_type)
+    if department_id is not None:
+        stmt = stmt.where(
+            select(1)
+            .where(
+                DocumentDepartment.document_id == Document.id,
+                DocumentDepartment.department_id == department_id,
+            )
+            .exists()
+        )
     return stmt
 
 
